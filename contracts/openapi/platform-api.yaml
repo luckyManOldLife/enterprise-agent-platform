@@ -1,0 +1,46 @@
+openapi: 3.1.0
+info:
+  title: Enterprise Agent Platform API
+  version: 0.1.0
+paths:
+  /api/agents:
+    get:
+      operationId: listAgents
+      responses:
+        '200': {description: Agent definitions}
+  /api/tasks:
+    post:
+      operationId: createTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '../json-schema/task-request.schema.json'}
+      responses:
+        '202': {description: Task accepted}
+  /api/tasks/{taskId}:
+    get:
+      operationId: getTask
+      parameters:
+        - {name: taskId, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Task state}
+  /api/tasks/{taskId}/events:
+    get:
+      operationId: streamTaskEvents
+      parameters:
+        - {name: taskId, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Server-sent events, content: {text/event-stream: {}}}
+  /api/approvals:
+    get:
+      operationId: listApprovals
+      responses:
+        '200': {description: Pending approvals}
+  /api/approvals/{approvalId}:
+    post:
+      operationId: decideApproval
+      parameters:
+        - {name: approvalId, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Approval decision accepted}

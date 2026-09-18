@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "task-request.schema.json",
+  "type": "object",
+  "required": ["tenantId", "userId", "input"],
+  "properties": {
+    "tenantId": {"type": "string", "minLength": 1},
+    "userId": {"type": "string", "minLength": 1},
+    "roles": {"type": "array", "items": {"type": "string"}},
+    "input": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "idempotencyKey": {"type": "string", "maxLength": 128}
+  },
+  "additionalProperties": false
+}

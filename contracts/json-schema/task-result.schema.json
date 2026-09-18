@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "task-result.schema.json",
+  "type": "object",
+  "required": ["taskId", "traceId", "status"],
+  "properties": {
+    "taskId": {"type": "string"},
+    "traceId": {"type": "string"},
+    "status": {"enum": ["SUBMITTED", "RUNNING", "WAITING_APPROVAL", "COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"]},
+    "output": {},
+    "errorCode": {"type": ["string", "null"]}
+  },
+  "additionalProperties": true
+}

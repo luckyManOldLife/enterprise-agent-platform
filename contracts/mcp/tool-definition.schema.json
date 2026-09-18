@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tool-definition.schema.json",
+  "type": "object",
+  "required": ["toolId", "name", "version", "riskLevel", "idempotent"],
+  "properties": {
+    "toolId": {"type": "string"},
+    "name": {"type": "string"},
+    "version": {"type": "string"},
+    "riskLevel": {"enum": ["LOW", "MEDIUM", "HIGH"]},
+    "requiredPermissions": {"type": "array", "items": {"type": "string"}},
+    "idempotent": {"type": "boolean"},
+    "timeoutMs": {"type": "integer", "minimum": 1}
+  },
+  "additionalProperties": true
+}

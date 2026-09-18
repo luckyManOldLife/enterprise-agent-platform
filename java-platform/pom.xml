@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.xr.agent</groupId>
+    <artifactId>enterprise-agent-platform</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>enterprise-agent-platform</name>
+    <description>Enterprise Agent platform Java modules</description>
+
+    <properties>
+        <java.version>21</java.version>
+        <maven.compiler.release>${java.version}</maven.compiler.release>
+        <spring.boot.version>4.1.1</spring.boot.version>
+        <spring.ai.version>2.0.1</spring.ai.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <junit.version>6.0.0</junit.version>
+    </properties>
+
+    <modules>
+        <module>platform-domain</module>
+        <module>platform-application</module>
+        <module>platform-api</module>
+        <module>agent-runtime</module>
+        <module>agent-registry</module>
+        <module>task-service</module>
+        <module>policy-engine</module>
+        <module>tool-registry</module>
+        <module>memory-service</module>
+        <module>evaluation-service</module>
+        <module>protocol-a2a</module>
+        <module>protocol-mcp</module>
+        <module>model-gateway</module>
+        <module>adapters/spring-ai-2</module>
+        <module>adapters/model-openai</module>
+        <module>adapters/model-qwen</module>
+        <module>adapters/model-ollama</module>
+        <module>adapters/persistence-postgres</module>
+        <module>adapters/cache-redis</module>
+        <module>adapters/registry-nacos</module>
+        <module>apps/agent-platform-server</module>
+        <module>apps/agent-worker</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>${junit.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.14.1</version>
+                    <configuration>
+                        <release>${maven.compiler.release}</release>
+                        <parameters>true</parameters>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.5.3</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+</project>

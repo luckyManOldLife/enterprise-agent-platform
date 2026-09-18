@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tool-call.schema.json",
+  "type": "object",
+  "required": ["toolId", "version", "arguments", "idempotencyKey"],
+  "properties": {
+    "toolId": {"type": "string"},
+    "version": {"type": "string"},
+    "arguments": {"type": "object"},
+    "idempotencyKey": {"type": "string"},
+    "traceId": {"type": "string"}
+  },
+  "additionalProperties": false
+}

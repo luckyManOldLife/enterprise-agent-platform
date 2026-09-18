@@ -1,0 +1,7 @@
+# <type>(<scope>): <subject>
+#
+# Body:
+# - explain the behavior change
+# - mention tests and contract/config impact
+#
+# Types: feat, fix, docs, refactor, test, chore, ci, build, perf, revert

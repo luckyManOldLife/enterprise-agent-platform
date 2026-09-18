@@ -1,0 +1,9 @@
+pipeline {
+  agent any
+  stages {
+    stage('Contract checks') { steps { sh 'echo contract checks' } }
+    stage('Java tests') { steps { sh 'cd java-platform && ./mvnw test' } }
+    stage('Python tests') { steps { sh 'cd python-services && uv run pytest' } }
+    stage('Build image') { when { branch 'main' } steps { sh 'echo build and publish image' } }
+  }
+}

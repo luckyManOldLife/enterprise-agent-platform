@@ -11,6 +11,7 @@
 
 - [x] 领域模型和任务状态机
 - [x] Policy Engine 首个纯 Java 规则实现
+- [x] 任务与 Outbox 原子持久化端口
 - Agent/Tool Registry
 - Supervisor Runtime
 - Policy Engine 的审批持久化和恢复

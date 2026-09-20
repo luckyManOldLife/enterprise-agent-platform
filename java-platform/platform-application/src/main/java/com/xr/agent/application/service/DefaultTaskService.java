@@ -1,18 +1,20 @@
 package com.xr.agent.application.service;
 
 import com.xr.agent.application.port.in.TaskUseCase;
-import com.xr.agent.application.port.out.TaskRepositoryPort;
+import com.xr.agent.application.port.out.TaskPersistencePort;
 import com.xr.agent.domain.model.AgentTask;
 
+import java.time.Instant;
+import java.util.HashMap;
 import java.util.Objects;
 import java.util.UUID;
 
 public final class DefaultTaskService implements TaskUseCase {
 
-    private final TaskRepositoryPort taskRepository;
+    private final TaskPersistencePort taskPersistence;
 
-    public DefaultTaskService(TaskRepositoryPort taskRepository) {
-        this.taskRepository = Objects.requireNonNull(taskRepository, "taskRepository");
+    public DefaultTaskService(TaskPersistencePort taskPersistence) {
+        this.taskPersistence = Objects.requireNonNull(taskPersistence, "taskPersistence");
     }
 
     @Override
@@ -27,12 +29,27 @@ public final class DefaultTaskService implements TaskUseCase {
                 command.targetAgent(),
                 command.input(),
                 null);
-        return taskRepository.save(task);
+        Map<String, Object> payload = new HashMap<>();
+        if (task.targetAgent() != null) {
+            payload.put("targetAgent", task.targetAgent());
+        }
+        if (task.sourceAgent() != null) {
+            payload.put("sourceAgent", task.sourceAgent());
+        }
+        TaskPersistencePort.TaskOutboxMessage event = new TaskPersistencePort.TaskOutboxMessage(
+                UUID.randomUUID(),
+                task.taskId(),
+                task.tenantId(),
+                task.traceId(),
+                "TASK_CREATED",
+                payload,
+                Instant.now());
+        return taskPersistence.saveWithOutbox(task, event);
     }
 
     @Override
     public AgentTask get(UUID taskId) {
-        return taskRepository.findById(taskId)
+        return taskPersistence.findById(taskId)
                 .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
     }
 }

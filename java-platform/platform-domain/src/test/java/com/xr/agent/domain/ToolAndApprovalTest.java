@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolAndApprovalTest {
@@ -33,5 +34,18 @@ class ToolAndApprovalTest {
 
         assertEquals(ApprovalStatus.APPROVED, approval.status());
         assertEquals("operator-a", approval.decidedBy());
+    }
+
+    @Test
+    void invalidApprovalActorDoesNotMutateStatus() {
+        Approval approval = new Approval(
+                UUID.randomUUID(), "tenant-a", "agent-a",
+                "Create after-sales task", Instant.now().plusSeconds(300));
+
+        assertThrows(IllegalArgumentException.class, () -> {
+            approval.approve(" ");
+        });
+
+        assertEquals(ApprovalStatus.PENDING, approval.status());
     }
 }

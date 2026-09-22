@@ -48,6 +48,7 @@ class TaskStateMachineTest {
     @Test
     void exposesTransitionRules() {
         assertEquals(true, TaskStateMachine.canTransition(TaskStatus.FAILED, TaskStatus.RUNNING));
+        assertEquals(true, TaskStateMachine.canTransition(TaskStatus.WAITING_APPROVAL, TaskStatus.FAILED));
         assertEquals(false, TaskStateMachine.canTransition(TaskStatus.SUCCEEDED, TaskStatus.RUNNING));
     }
 }

@@ -91,6 +91,43 @@ public final class AgentTask {
                 deadline);
     }
 
+    public static AgentTask restore(
+            UUID taskId,
+            UUID parentTaskId,
+            String tenantId,
+            String userId,
+            String traceId,
+            String conversationId,
+            String sourceAgent,
+            String targetAgent,
+            Map<String, Object> input,
+            Instant deadline,
+            TaskStatus status,
+            Map<String, Object> output,
+            String errorCode,
+            int retryCount,
+            Instant startedAt,
+            Instant completedAt) {
+        AgentTask task = new AgentTask(
+                taskId,
+                parentTaskId,
+                tenantId,
+                userId,
+                traceId,
+                conversationId,
+                sourceAgent,
+                targetAgent,
+                input,
+                deadline);
+        task.status = Objects.requireNonNull(status, "status");
+        task.output = output == null ? null : Map.copyOf(output);
+        task.errorCode = errorCode;
+        task.retryCount = retryCount;
+        task.startedAt = startedAt;
+        task.completedAt = completedAt;
+        return task;
+    }
+
     public void start() {
         transitionTo(TaskStatus.RUNNING);
         if (startedAt == null) {

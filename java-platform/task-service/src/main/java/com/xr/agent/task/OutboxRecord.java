@@ -21,6 +21,31 @@ public final class OutboxRecord {
         this.availableAt = message.occurredAt();
     }
 
+    private OutboxRecord(
+            TaskOutboxMessage message,
+            OutboxStatus status,
+            int attempts,
+            Instant availableAt,
+            Instant publishedAt,
+            String lastError) {
+        this.message = Objects.requireNonNull(message, "message");
+        this.status = Objects.requireNonNull(status, "status");
+        this.attempts = attempts;
+        this.availableAt = Objects.requireNonNull(availableAt, "availableAt");
+        this.publishedAt = publishedAt;
+        this.lastError = lastError;
+    }
+
+    public static OutboxRecord restore(
+            TaskOutboxMessage message,
+            OutboxStatus status,
+            int attempts,
+            Instant availableAt,
+            Instant publishedAt,
+            String lastError) {
+        return new OutboxRecord(message, status, attempts, availableAt, publishedAt, lastError);
+    }
+
     public boolean isClaimable(Instant now) {
         return (status == OutboxStatus.PENDING || status == OutboxStatus.FAILED)
                 && !availableAt.isAfter(now);

@@ -20,6 +20,7 @@ public final class TaskStateMachine {
                     TaskStatus.TIMED_OUT),
             TaskStatus.WAITING_APPROVAL, EnumSet.of(
                     TaskStatus.RUNNING,
+                    TaskStatus.FAILED,
                     TaskStatus.CANCELLED,
                     TaskStatus.TIMED_OUT),
             TaskStatus.WAITING_TOOL, EnumSet.of(

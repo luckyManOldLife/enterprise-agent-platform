@@ -26,6 +26,49 @@ public final class Approval {
         this.status = ApprovalStatus.PENDING;
     }
 
+    private Approval(
+            UUID approvalId,
+            UUID taskId,
+            String tenantId,
+            String requestedBy,
+            String reason,
+            Instant expiresAt,
+            ApprovalStatus status,
+            String decidedBy,
+            Instant decidedAt) {
+        this.approvalId = Objects.requireNonNull(approvalId, "approvalId");
+        this.taskId = Objects.requireNonNull(taskId, "taskId");
+        this.tenantId = requireText(tenantId, "tenantId");
+        this.requestedBy = requireText(requestedBy, "requestedBy");
+        this.reason = requireText(reason, "reason");
+        this.expiresAt = Objects.requireNonNull(expiresAt, "expiresAt");
+        this.status = Objects.requireNonNull(status, "status");
+        this.decidedBy = decidedBy;
+        this.decidedAt = decidedAt;
+    }
+
+    public static Approval restore(
+            UUID approvalId,
+            UUID taskId,
+            String tenantId,
+            String requestedBy,
+            String reason,
+            Instant expiresAt,
+            ApprovalStatus status,
+            String decidedBy,
+            Instant decidedAt) {
+        return new Approval(
+                approvalId,
+                taskId,
+                tenantId,
+                requestedBy,
+                reason,
+                expiresAt,
+                status,
+                decidedBy,
+                decidedAt);
+    }
+
     public void approve(String actor) {
         decide(ApprovalStatus.APPROVED, actor);
     }
@@ -44,8 +87,9 @@ public final class Approval {
         if (status != ApprovalStatus.PENDING) {
             throw new IllegalStateException("Approval is not pending: " + status);
         }
+        String actorValue = requireText(actor, "actor");
         status = target;
-        decidedBy = requireText(actor, "actor");
+        decidedBy = actorValue;
         decidedAt = Instant.now();
     }
 

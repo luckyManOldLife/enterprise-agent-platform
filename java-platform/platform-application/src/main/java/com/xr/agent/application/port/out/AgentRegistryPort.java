@@ -7,6 +7,8 @@ import java.util.Optional;
 
 public interface AgentRegistryPort {
 
+    void register(AgentDefinition agent);
+
     List<AgentDefinition> findAvailable(String tenantId);
 
     Optional<AgentDefinition> findById(String agentId);

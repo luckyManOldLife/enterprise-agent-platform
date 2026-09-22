@@ -14,5 +14,5 @@
 任务创建请求：
 
 ```json
-{"tenant_id":"demo","user_id":"u-1001","roles":["support_operator"],"input":"查询客户 CUST-1001 最近订单并创建售后任务"}
+{"tenantId":"demo","userId":"u-1001","roles":["support_operator"],"input":"查询客户 CUST-1001 最近订单并创建售后任务"}
 ```

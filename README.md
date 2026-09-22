@@ -13,6 +13,12 @@
 早期 Python 本地闭环已归档到 `prototype/python-local/`，仅作对照和回归使用，
 不作为正式平台运行入口。
 
+## 本地开发
+
+Java 平台使用项目内 Maven Wrapper，开发机或云服务器不需要全局安装 Maven。
+只需安装 JDK 21、`curl` 或 `wget`、`unzip`，然后在 `java-platform/` 下使用 `./mvnw test`。
+PostgreSQL、Redis 等基础服务优先复用 Docker Compose，避免在主机裸装服务。
+
 ## 技术分工
 
 ```text

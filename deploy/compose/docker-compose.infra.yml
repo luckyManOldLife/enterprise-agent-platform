@@ -1,0 +1,27 @@
+name: enterprise-agent-platform
+
+services:
+  agent-platform:
+    image: ${EAP_IMAGE}:${EAP_IMAGE_TAG}
+    container_name: eap-agent-platform
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      SPRING_PROFILES_ACTIVE: ${EAP_SPRING_PROFILES_ACTIVE:-infra}
+      POSTGRES_URL: jdbc:postgresql://infra-postgres:5432/${EAP_POSTGRES_DB}
+      POSTGRES_USER: ${EAP_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${EAP_POSTGRES_PASSWORD}
+      REDIS_URL: redis://:${EAP_REDIS_PASSWORD}@infra-redis:6379/${EAP_REDIS_DB:-3}
+      MODEL_PROVIDER: ${EAP_MODEL_PROVIDER:-mock}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/actuator/health || wget -q --spider http://127.0.0.1:8080/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 8
+    networks:
+      - infra
+
+networks:
+  infra:
+    external: true
+    name: ${EAP_INFRA_NETWORK_NAME:-infra-stack_infra}

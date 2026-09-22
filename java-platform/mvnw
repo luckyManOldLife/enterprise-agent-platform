@@ -1,0 +1,74 @@
+#!/usr/bin/env sh
+set -eu
+
+BASEDIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+WRAPPER_PROPERTIES="$BASEDIR/.mvn/wrapper/maven-wrapper.properties"
+
+if [ ! -f "$WRAPPER_PROPERTIES" ]; then
+  echo "Missing Maven wrapper properties: $WRAPPER_PROPERTIES" >&2
+  exit 1
+fi
+
+DISTRIBUTION_URL=$(sed -n 's/^distributionUrl=//p' "$WRAPPER_PROPERTIES" | tail -n 1)
+if [ -z "$DISTRIBUTION_URL" ]; then
+  echo "Missing distributionUrl in $WRAPPER_PROPERTIES" >&2
+  exit 1
+fi
+
+if [ -z "${JAVA_HOME:-}" ] && ! command -v java >/dev/null 2>&1; then
+  echo "Java 21 is required. Install JDK 21 or set JAVA_HOME before running ./mvnw." >&2
+  exit 1
+fi
+
+MAVEN_USER_HOME=${MAVEN_USER_HOME:-"$HOME/.m2"}
+DIST_FILE=${DISTRIBUTION_URL##*/}
+DIST_NAME=${DIST_FILE%-bin.zip}
+INSTALL_ROOT="$MAVEN_USER_HOME/wrapper/dists"
+INSTALL_DIR="$INSTALL_ROOT/$DIST_NAME"
+MVN_BIN="$INSTALL_DIR/bin/mvn"
+
+if [ ! -x "$MVN_BIN" ]; then
+  if ! command -v unzip >/dev/null 2>&1; then
+    echo "unzip is required to bootstrap Maven from $DISTRIBUTION_URL" >&2
+    exit 1
+  fi
+
+  TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/mvnw.XXXXXX")
+  INSTALL_TMP="$INSTALL_ROOT/$DIST_NAME.tmp.$$"
+  cleanup() {
+    rm -rf "$TMP_DIR" "$INSTALL_TMP"
+  }
+  trap cleanup EXIT INT TERM
+
+  mkdir -p "$INSTALL_ROOT"
+  ARCHIVE="$TMP_DIR/$DIST_FILE"
+
+  echo "Downloading Maven from $DISTRIBUTION_URL"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$DISTRIBUTION_URL" -o "$ARCHIVE"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q "$DISTRIBUTION_URL" -O "$ARCHIVE"
+  else
+    echo "curl or wget is required to download Maven." >&2
+    exit 1
+  fi
+
+  unzip -q "$ARCHIVE" -d "$TMP_DIR"
+  EXTRACTED_DIR=$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d -name 'apache-maven-*' | head -n 1)
+  if [ -z "$EXTRACTED_DIR" ]; then
+    echo "Downloaded archive did not contain an apache-maven-* directory." >&2
+    exit 1
+  fi
+
+  mv "$EXTRACTED_DIR" "$INSTALL_TMP"
+  if [ -e "$INSTALL_DIR" ]; then
+    echo "Maven cache exists but $MVN_BIN is not executable: $INSTALL_DIR" >&2
+    echo "Remove that directory and rerun ./mvnw." >&2
+    exit 1
+  fi
+  mv "$INSTALL_TMP" "$INSTALL_DIR"
+  trap - EXIT INT TERM
+  rm -rf "$TMP_DIR"
+fi
+
+exec "$MVN_BIN" "$@"

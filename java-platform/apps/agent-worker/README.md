@@ -27,3 +27,42 @@ CLIPROXY_TIMEOUT_SECONDS=30
 ```
 
 `CLIPROXY_API_KEY` 必须由部署系统注入，不能提交到 `.env`、代码或数据库。
+
+## PostgreSQL polling runtime
+
+`AgentWorkerApplication` 是独立 Worker 进程。它使用 JDBC PostgreSQL 适配器认领
+`task_outbox` 记录，并将真实 Agent 调用的结果通过乐观锁写回 `agent_task`。
+
+除上述 CLIProxyAPI 变量外，运行时还需要：
+
+```text
+POSTGRES_URL=jdbc:postgresql://postgres:5432/agent_platform
+POSTGRES_USER=agent_worker
+POSTGRES_PASSWORD=<injected database password>
+WORKER_BATCH_SIZE=10
+WORKER_POLL_INTERVAL_MILLIS=1000
+WORKER_MODEL_AGENT_IDS=supervisor
+```
+
+`WORKER_MODEL_AGENT_IDS` 是逗号分隔的本地模型 Agent 白名单。Worker 只会执行名单中
+可用的 Agent；未知或未授权的任务会以 `AGENT_UNAVAILABLE` 结束。当前静态 Agent 使用
+`model://cliproxyapi` 端点和 `task.execute` 能力。
+
+构建 Worker 镜像前先准备其运行时依赖：
+
+```bash
+cd java-platform
+./mvnw -pl apps/agent-worker -am package -DskipTests
+docker build -f ../deploy/docker/agent-worker.Dockerfile -t enterprise-agent-worker:local .
+```
+
+本机 CLIProxyAPI 位于外部 Docker 网络 `infra-stack_infra` 时，隔离本地栈通过该网络
+使用 `http://infra-cli-proxy-api:8317/v1` 访问代理：
+
+```bash
+cd deploy/compose
+CLIPROXY_API_KEY=... docker compose --profile worker up -d agent-worker
+```
+
+不要改为 `host.docker.internal`：当前 CLIProxyAPI 仅发布到宿主机 loopback，普通容器
+不能可靠访问该地址。

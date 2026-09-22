@@ -20,5 +20,27 @@ services:
       REDIS_URL: redis://redis:6379
     depends_on: [postgres, redis]
     ports: ["8080:8080"]
+  agent-worker:
+    profiles: ["worker"]
+    build:
+      context: ../../java-platform
+      dockerfile: ../deploy/docker/agent-worker.Dockerfile
+    environment:
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/agent_platform
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: change-me-local-only
+      CLIPROXY_API_BASE_URL: ${CLIPROXY_API_BASE_URL:-http://infra-cli-proxy-api:8317/v1}
+      CLIPROXY_API_KEY: ${CLIPROXY_API_KEY:-}
+      CLIPROXY_MODEL: ${CLIPROXY_MODEL:-gpt-5.5}
+      CLIPROXY_TIMEOUT_SECONDS: ${CLIPROXY_TIMEOUT_SECONDS:-30}
+      WORKER_BATCH_SIZE: ${WORKER_BATCH_SIZE:-10}
+      WORKER_POLL_INTERVAL_MILLIS: ${WORKER_POLL_INTERVAL_MILLIS:-1000}
+      WORKER_MODEL_AGENT_IDS: ${WORKER_MODEL_AGENT_IDS:-supervisor}
+    depends_on: [postgres]
+    networks: [default, cli-proxy]
 volumes:
   postgres-data:
+networks:
+  cli-proxy:
+    external: true
+    name: ${EAP_CLIPROXY_NETWORK_NAME:-infra-stack_infra}

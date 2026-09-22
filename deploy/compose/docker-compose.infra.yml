@@ -20,6 +20,24 @@ services:
       retries: 8
     networks:
       - infra
+  agent-worker:
+    image: ${EAP_WORKER_IMAGE}:${EAP_WORKER_IMAGE_TAG}
+    container_name: eap-agent-worker
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      POSTGRES_URL: jdbc:postgresql://infra-postgres:5432/${EAP_POSTGRES_DB}
+      POSTGRES_USER: ${EAP_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${EAP_POSTGRES_PASSWORD}
+      CLIPROXY_API_BASE_URL: ${EAP_CLIPROXY_API_BASE_URL:-http://infra-cli-proxy-api:8317/v1}
+      CLIPROXY_API_KEY: ${EAP_CLIPROXY_API_KEY:-}
+      CLIPROXY_MODEL: ${EAP_CLIPROXY_MODEL:-gpt-5.5}
+      CLIPROXY_TIMEOUT_SECONDS: ${EAP_CLIPROXY_TIMEOUT_SECONDS:-30}
+      WORKER_BATCH_SIZE: ${EAP_WORKER_BATCH_SIZE:-10}
+      WORKER_POLL_INTERVAL_MILLIS: ${EAP_WORKER_POLL_INTERVAL_MILLIS:-1000}
+      WORKER_MODEL_AGENT_IDS: ${EAP_WORKER_MODEL_AGENT_IDS:-supervisor}
+    networks:
+      - infra
 
 networks:
   infra:

@@ -12,4 +12,5 @@ JDBC PostgreSQL adapter for platform persistence.
 - `TaskEventStorePort`: append and list audit events for SSE streams.
 
 The adapter depends on `javax.sql.DataSource` and a caller-provided
-`JsonMapCodec`; it does not depend on Spring, JPA or a concrete JSON library.
+`JsonMapCodec`; `JdkJsonMapCodec` is available for JDK-only deployments. It
+does not depend on Spring, JPA or a concrete JSON library.

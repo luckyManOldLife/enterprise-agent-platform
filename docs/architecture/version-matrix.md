@@ -7,6 +7,7 @@
 | JDK | 21 | 已冻结 | 运行基线；Spring Boot 4.x 要求至少 JDK 17 |
 | Spring Boot | 4.1.1 | 已冻结 | 与 Spring AI 2.0.1 的官方支持线匹配 |
 | Spring AI | 2.0.1 | 已冻结 | 只进入 `adapters/spring-ai-2` |
+| PostgreSQL JDBC | 42.7.13 | 已冻结 | Worker 使用 JDBC PostgreSQL 持久化；2026-09-22 纳入项目依赖基线 |
 | Spring Cloud | 与 Boot 匹配 | 待验证 | 服务治理 |
 | Spring Cloud Alibaba | 与 Cloud/Nacos 匹配 | 待验证 | 配置和发现 |
 | Nacos Client | 与 Alibaba 匹配 | 待验证 | 不单独升级 |

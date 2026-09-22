@@ -19,6 +19,14 @@ public interface TaskPersistencePort {
 
     AgentTask saveWithOutbox(AgentTask task, TaskOutboxMessage event);
 
+    /**
+     * Persists a state change only when the aggregate still has {@code expectedVersion}.
+     *
+     * <p>Implementations must atomically increment the persisted version and return the
+     * resulting task snapshot. A version mismatch must not overwrite the current state.</p>
+     */
+    AgentTask update(AgentTask task, long expectedVersion);
+
     Optional<AgentTask> findById(UUID taskId);
 
     record TaskOutboxMessage(

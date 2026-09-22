@@ -2,6 +2,7 @@ package com.xr.agent.task;
 
 import com.xr.agent.application.port.out.TaskPersistencePort;
 import com.xr.agent.domain.model.AgentTask;
+import com.xr.agent.domain.model.TaskVersionConflictException;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -28,21 +29,46 @@ public final class InMemoryTaskPersistence implements TaskPersistencePort, Outbo
         if (!task.taskId().equals(event.taskId())) {
             throw new IllegalArgumentException("Task and outbox aggregate ids must match");
         }
-        if (tasks.putIfAbsent(task.taskId(), task) != null) {
+        if (task.version() != 0) {
+            throw new IllegalArgumentException("New task version must be zero");
+        }
+        AgentTask stored = task.copyWithVersion(task.version());
+        if (tasks.putIfAbsent(task.taskId(), stored) != null) {
             throw new IllegalStateException("Task already exists: " + task.taskId());
         }
         try {
             append(event);
-            return task;
+            return stored.copyWithVersion(stored.version());
         } catch (RuntimeException exception) {
-            tasks.remove(task.taskId(), task);
+            tasks.remove(task.taskId(), stored);
             throw exception;
         }
     }
 
     @Override
     public Optional<AgentTask> findById(UUID taskId) {
-        return Optional.ofNullable(tasks.get(taskId));
+        return Optional.ofNullable(tasks.get(taskId))
+                .map(task -> task.copyWithVersion(task.version()));
+    }
+
+    @Override
+    public synchronized AgentTask update(AgentTask task, long expectedVersion) {
+        if (task == null) {
+            throw new NullPointerException("task");
+        }
+        if (task.version() != expectedVersion) {
+            throw new IllegalArgumentException("Task version does not match expectedVersion");
+        }
+        AgentTask current = tasks.get(task.taskId());
+        if (current == null || current.version() != expectedVersion) {
+            throw new TaskVersionConflictException(task.taskId(), expectedVersion);
+        }
+
+        AgentTask next = task.copyWithVersion(expectedVersion + 1);
+        if (!tasks.replace(task.taskId(), current, next)) {
+            throw new TaskVersionConflictException(task.taskId(), expectedVersion);
+        }
+        return next.copyWithVersion(next.version());
     }
 
     @Override

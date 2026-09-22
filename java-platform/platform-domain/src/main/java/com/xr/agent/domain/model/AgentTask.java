@@ -25,6 +25,7 @@ public final class AgentTask {
     private int retryCount;
     private Instant startedAt;
     private Instant completedAt;
+    private final long version;
 
     private AgentTask(
             UUID taskId,
@@ -36,7 +37,8 @@ public final class AgentTask {
             String sourceAgent,
             String targetAgent,
             Map<String, Object> input,
-            Instant deadline) {
+            Instant deadline,
+            long version) {
         this.taskId = Objects.requireNonNull(taskId, "taskId");
         this.parentTaskId = parentTaskId;
         this.tenantId = requireText(tenantId, "tenantId");
@@ -48,6 +50,7 @@ public final class AgentTask {
         this.input = Map.copyOf(Objects.requireNonNull(input, "input"));
         this.deadline = deadline;
         this.status = TaskStatus.CREATED;
+        this.version = requireVersion(version);
     }
 
     public static AgentTask create(
@@ -69,7 +72,8 @@ public final class AgentTask {
                 sourceAgent,
                 targetAgent,
                 input,
-                deadline);
+                deadline,
+                0);
     }
 
     public static AgentTask childOf(
@@ -88,7 +92,8 @@ public final class AgentTask {
                 parent.targetAgent,
                 targetAgent,
                 input,
-                deadline);
+                deadline,
+                0);
     }
 
     public static AgentTask restore(
@@ -107,7 +112,8 @@ public final class AgentTask {
             String errorCode,
             int retryCount,
             Instant startedAt,
-            Instant completedAt) {
+            Instant completedAt,
+            long version) {
         AgentTask task = new AgentTask(
                 taskId,
                 parentTaskId,
@@ -118,7 +124,8 @@ public final class AgentTask {
                 sourceAgent,
                 targetAgent,
                 input,
-                deadline);
+                deadline,
+                version);
         task.status = Objects.requireNonNull(status, "status");
         task.output = output == null ? null : Map.copyOf(output);
         task.errorCode = errorCode;
@@ -126,6 +133,27 @@ public final class AgentTask {
         task.startedAt = startedAt;
         task.completedAt = completedAt;
         return task;
+    }
+
+    public AgentTask copyWithVersion(long newVersion) {
+        return restore(
+                taskId,
+                parentTaskId,
+                tenantId,
+                userId,
+                traceId,
+                conversationId,
+                sourceAgent,
+                targetAgent,
+                input,
+                deadline,
+                status,
+                output,
+                errorCode,
+                retryCount,
+                startedAt,
+                completedAt,
+                newVersion);
     }
 
     public void start() {
@@ -189,6 +217,13 @@ public final class AgentTask {
         return value;
     }
 
+    private static long requireVersion(long value) {
+        if (value < 0) {
+            throw new IllegalArgumentException("version must not be negative");
+        }
+        return value;
+    }
+
     public UUID taskId() { return taskId; }
     public UUID parentTaskId() { return parentTaskId; }
     public String tenantId() { return tenantId; }
@@ -205,4 +240,5 @@ public final class AgentTask {
     public Instant deadline() { return deadline; }
     public Instant startedAt() { return startedAt; }
     public Instant completedAt() { return completedAt; }
+    public long version() { return version; }
 }

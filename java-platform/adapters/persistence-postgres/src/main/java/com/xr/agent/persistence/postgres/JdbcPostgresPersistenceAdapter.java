@@ -9,6 +9,7 @@ import com.xr.agent.domain.model.AgentTask;
 import com.xr.agent.domain.model.Approval;
 import com.xr.agent.domain.model.ApprovalStatus;
 import com.xr.agent.domain.model.TaskStatus;
+import com.xr.agent.domain.model.TaskVersionConflictException;
 import com.xr.agent.task.OutboxRecord;
 import com.xr.agent.task.OutboxStatus;
 import com.xr.agent.task.OutboxStorePort;
@@ -61,7 +62,7 @@ public final class JdbcPostgresPersistenceAdapter
             try (PreparedStatement statement = connection.prepareStatement("""
                     SELECT task_id, parent_task_id, tenant_id, user_id, trace_id, conversation_id,
                            source_agent, target_agent, status, input, output, error_code,
-                           retry_count, deadline, started_at, completed_at
+                           retry_count, deadline, started_at, completed_at, version
                       FROM agent_task
                      WHERE task_id = ?
                     """)) {
@@ -73,6 +74,46 @@ public final class JdbcPostgresPersistenceAdapter
                     return Optional.of(mapTask(rows));
                 }
             }
+        });
+    }
+
+    @Override
+    public AgentTask update(AgentTask task, long expectedVersion) {
+        Objects.requireNonNull(task, "task");
+        if (task.version() != expectedVersion) {
+            throw new IllegalArgumentException("Task version does not match expectedVersion");
+        }
+
+        return inTransaction(connection -> {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    UPDATE agent_task
+                       SET status = ?,
+                           output = ?::jsonb,
+                           error_code = ?,
+                           retry_count = ?,
+                           deadline = ?,
+                           started_at = ?,
+                           completed_at = ?,
+                           version = version + 1
+                     WHERE task_id = ?
+                       AND tenant_id = ?
+                       AND version = ?
+                    """)) {
+                statement.setString(1, task.status().name());
+                statement.setString(2, task.output() == null ? null : jsonCodec.toJson(task.output()));
+                statement.setString(3, task.errorCode());
+                statement.setInt(4, task.retryCount());
+                setNullableInstant(statement, 5, task.deadline());
+                setNullableInstant(statement, 6, task.startedAt());
+                setNullableInstant(statement, 7, task.completedAt());
+                statement.setObject(8, task.taskId());
+                statement.setString(9, task.tenantId());
+                statement.setLong(10, expectedVersion);
+                if (statement.executeUpdate() != 1) {
+                    throw new TaskVersionConflictException(task.taskId(), expectedVersion);
+                }
+            }
+            return task.copyWithVersion(expectedVersion + 1);
         });
     }
 
@@ -285,9 +326,9 @@ public final class JdbcPostgresPersistenceAdapter
                 INSERT INTO agent_task (
                     task_id, parent_task_id, conversation_id, trace_id, tenant_id, user_id,
                     source_agent, target_agent, status, input, output, error_code, retry_count,
-                    deadline, started_at, completed_at
+                    deadline, started_at, completed_at, version
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?)
                 """)) {
             statement.setObject(1, task.taskId());
             statement.setObject(2, task.parentTaskId());
@@ -305,6 +346,7 @@ public final class JdbcPostgresPersistenceAdapter
             setNullableInstant(statement, 14, task.deadline());
             setNullableInstant(statement, 15, task.startedAt());
             setNullableInstant(statement, 16, task.completedAt());
+            statement.setLong(17, task.version());
             statement.executeUpdate();
         }
     }
@@ -360,7 +402,8 @@ public final class JdbcPostgresPersistenceAdapter
                 rows.getString("error_code"),
                 rows.getInt("retry_count"),
                 instant(rows, "started_at"),
-                instant(rows, "completed_at"));
+                instant(rows, "completed_at"),
+                rows.getLong("version"));
     }
 
     private OutboxRecord mapOutbox(ResultSet rows, OutboxStatus status, int attempts) throws SQLException {

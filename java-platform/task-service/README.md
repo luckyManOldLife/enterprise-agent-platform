@@ -4,7 +4,8 @@
 
 ## 当前实现
 
-- `TaskPersistencePort`：应用层定义的原子边界，要求任务记录和 Outbox 事件同事务提交。
+- `TaskPersistencePort`：应用层定义的原子边界，要求任务记录和 Outbox 事件同事务提交，
+  并通过 `agent_task.version` 执行任务状态更新的乐观锁校验。
 - `OutboxRecord`：Pending、Processing、Published、Failed 状态和重试次数。
 - `InMemoryTaskPersistence`：测试和本地开发适配器，不用于生产。
 

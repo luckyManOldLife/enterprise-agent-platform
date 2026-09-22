@@ -24,14 +24,26 @@ public final class InMemoryTaskPersistence implements TaskPersistencePort, Outbo
 
     private final ConcurrentMap<UUID, AgentTask> tasks = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, OutboxRecord> outbox = new ConcurrentHashMap<>();
+    private final ConcurrentMap<IdempotencyKey, UUID> idempotencyTasks = new ConcurrentHashMap<>();
 
     @Override
-    public synchronized AgentTask saveWithOutbox(AgentTask task, TaskOutboxMessage event) {
+    public synchronized AgentTask saveWithOutbox(
+            AgentTask task,
+            TaskOutboxMessage event,
+            String idempotencyKey) {
         if (!task.taskId().equals(event.taskId())) {
             throw new IllegalArgumentException("Task and outbox aggregate ids must match");
         }
         if (task.version() != 0) {
             throw new IllegalArgumentException("New task version must be zero");
+        }
+        String normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
+        if (normalizedIdempotencyKey != null) {
+            UUID existingTaskId = idempotencyTasks.get(new IdempotencyKey(
+                    task.tenantId(), normalizedIdempotencyKey));
+            if (existingTaskId != null) {
+                return findById(existingTaskId).orElseThrow();
+            }
         }
         AgentTask stored = task.copyWithVersion(task.version());
         if (tasks.putIfAbsent(task.taskId(), stored) != null) {
@@ -39,6 +51,9 @@ public final class InMemoryTaskPersistence implements TaskPersistencePort, Outbo
         }
         try {
             append(event);
+            if (normalizedIdempotencyKey != null) {
+                idempotencyTasks.put(new IdempotencyKey(task.tenantId(), normalizedIdempotencyKey), task.taskId());
+            }
             return stored.copyWithVersion(stored.version());
         } catch (RuntimeException exception) {
             tasks.remove(task.taskId(), stored);
@@ -115,5 +130,18 @@ public final class InMemoryTaskPersistence implements TaskPersistencePort, Outbo
             throw new IllegalArgumentException("Outbox event not found: " + eventId);
         }
         return record;
+    }
+
+    private static String normalizeIdempotencyKey(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        if (value.length() > 256) {
+            throw new IllegalArgumentException("idempotencyKey must not exceed 256 characters");
+        }
+        return value;
+    }
+
+    private record IdempotencyKey(String tenantId, String value) {
     }
 }

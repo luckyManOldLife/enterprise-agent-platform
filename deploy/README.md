@@ -7,14 +7,15 @@
 
 - `compose/docker-compose.yml`：项目自带的隔离本地栈，独立启动 PostgreSQL 和 Redis。
 - `compose/docker-compose.infra.yml`：接入现有 `docker-stack` 的 `infra-stack_infra`
-  网络，复用 `infra-postgres` 和 `infra-redis`，只运行平台应用容器。
+  网络，复用 `infra-postgres` 和 `infra-redis`，运行平台 API 和 Worker 容器。
 
-Worker 以独立容器运行，使用 PostgreSQL Outbox 认领任务并调用 CLIProxyAPI。Worker
-镜像由 `docker/agent-worker.Dockerfile` 构建，必须先执行：
+API 与 Worker 分别构建并共享 PostgreSQL 任务、Outbox、审批和审计记录。Worker 使用
+Outbox 认领任务并调用 CLIProxyAPI；两者镜像必须先执行：
 
 ```bash
 cd java-platform
-./mvnw -pl apps/agent-worker -am package -DskipTests
+./mvnw -pl apps/agent-platform-server,apps/agent-worker -am package -DskipTests
+docker build -f ../deploy/docker/agent-platform.Dockerfile -t enterprise-agent-platform:local .
 docker build -f ../deploy/docker/agent-worker.Dockerfile -t enterprise-agent-worker:local .
 ```
 

@@ -40,6 +40,7 @@ class PlatformApiFacadeTest {
         assertEquals("api", tasks.lastCommand.sourceAgent());
         assertEquals("supervisor", tasks.lastCommand.targetAgent());
         assertEquals("Create after-sales task", tasks.lastCommand.input().get("input"));
+        assertEquals("idem-1", tasks.lastCommand.idempotencyKey());
     }
 
     @Test
@@ -67,6 +68,26 @@ class PlatformApiFacadeTest {
             api.createTask(new PlatformApiFacade.CreateTaskRequest(
                     "tenant-a", "user-a", null, null, List.of(), " ", null));
         });
+    }
+
+    @Test
+    void doesNotExposeTasksOrEventsAcrossTenantBoundaries() {
+        RecordingTaskUseCase tasks = new RecordingTaskUseCase();
+        PlatformApiFacade api = newApi(tasks);
+        PlatformApiFacade.TaskResponse created = api.createTask(new PlatformApiFacade.CreateTaskRequest(
+                "tenant-a",
+                "user-a",
+                "trace-a",
+                null,
+                List.of(),
+                "Create after-sales task",
+                null));
+
+        assertEquals("tenant-a", api.getTask(created.taskId(), "tenant-a").tenantId());
+        assertThrows(PlatformApiFacade.TenantResourceNotFoundException.class, () ->
+                api.getTask(created.taskId(), "tenant-b"));
+        assertThrows(PlatformApiFacade.TenantResourceNotFoundException.class, () ->
+                api.streamTaskEvents(created.taskId(), "tenant-b"));
     }
 
     private static PlatformApiFacade newApi(RecordingTaskUseCase tasks) {

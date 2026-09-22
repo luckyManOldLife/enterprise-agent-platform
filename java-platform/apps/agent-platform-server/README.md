@@ -1,10 +1,10 @@
 # agent-platform-server
 
-Java 平台首期部署单元，组合 REST API、Supervisor、Registry、Task、Policy、Tool 和 Model Gateway。首期采用可观测的模块化单体。
+Java 平台部署单元，组合 REST API、Supervisor、Registry、Task、Policy、Tool 和 Model Gateway。
 
-当前提供 JDK 21 本地 HTTP 运行入口，用于验证 Platform API 的网络边界。默认使用
-内存任务、审批和 Agent Registry 适配器，不连接 PostgreSQL、业务 Agent 或模型供应商，
-因此不能作为生产部署单元。
+`PLATFORM_RUNTIME=local` 是默认 JDK 21 本地 HTTP 入口，使用内存任务、审批和 Agent
+Registry 适配器验证网络边界。`PLATFORM_RUNTIME=postgres` 使用 JDBC PostgreSQL
+适配器，和 `agent-worker` 共享 `agent_task`、`task_outbox`、审批和审计表。
 
 ```bash
 cd java-platform
@@ -21,6 +21,23 @@ java -cp \
   com.xr.agent.server.AgentPlatformApplication
 ```
 
-服务默认监听 `127.0.0.1:8080`，可通过 `-Dserver.port=8081` 或 `PORT=8081` 覆盖。
+PostgreSQL 运行时需要：
+
+```text
+PLATFORM_RUNTIME=postgres
+POSTGRES_URL=jdbc:postgresql://postgres:5432/agent_platform
+POSTGRES_USER=agent_platform_app
+POSTGRES_PASSWORD=<injected database password>
+MODEL_AGENT_IDS=supervisor
+SERVER_HOST=0.0.0.0
+```
+
+`MODEL_AGENT_IDS` 是 API 与 Worker 共同使用的模型 Agent 白名单，必须保持一致。任务提交
+时的 `idempotencyKey` 以租户为范围持久化，重复请求返回原任务且不会创建额外 Outbox
+记录。
+
+服务默认监听 `127.0.0.1:8080`，可通过 `-Dserver.port=8081` 或 `PORT=8081` 覆盖；
+容器运行必须设置 `SERVER_HOST=0.0.0.0`。
 已实现 `/healthz`、`/api/agents`、`/api/tasks`、`/api/tasks/{taskId}`、
-`/api/tasks/{taskId}/events` 和审批查询/决策路由。
+`/api/tasks/{taskId}/events` 和审批查询/决策路由。任务详情和事件流请求必须带
+`tenantId` 查询参数，例如 `/api/tasks/{taskId}?tenantId=tenant-a`。

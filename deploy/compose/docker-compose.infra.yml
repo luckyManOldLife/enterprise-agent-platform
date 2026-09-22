@@ -7,14 +7,16 @@ services:
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Asia/Shanghai}
-      SPRING_PROFILES_ACTIVE: ${EAP_SPRING_PROFILES_ACTIVE:-infra}
+      PLATFORM_RUNTIME: postgres
+      SERVER_HOST: 0.0.0.0
       POSTGRES_URL: jdbc:postgresql://infra-postgres:5432/${EAP_POSTGRES_DB}
       POSTGRES_USER: ${EAP_POSTGRES_USER}
       POSTGRES_PASSWORD: ${EAP_POSTGRES_PASSWORD}
       REDIS_URL: redis://:${EAP_REDIS_PASSWORD}@infra-redis:6379/${EAP_REDIS_DB:-3}
       MODEL_PROVIDER: ${EAP_MODEL_PROVIDER:-mock}
+      MODEL_AGENT_IDS: ${EAP_MODEL_AGENT_IDS:-supervisor}
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/actuator/health || wget -q --spider http://127.0.0.1:8080/health"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/healthz"]
       interval: 20s
       timeout: 5s
       retries: 8
@@ -35,7 +37,7 @@ services:
       CLIPROXY_TIMEOUT_SECONDS: ${EAP_CLIPROXY_TIMEOUT_SECONDS:-30}
       WORKER_BATCH_SIZE: ${EAP_WORKER_BATCH_SIZE:-10}
       WORKER_POLL_INTERVAL_MILLIS: ${EAP_WORKER_POLL_INTERVAL_MILLIS:-1000}
-      WORKER_MODEL_AGENT_IDS: ${EAP_WORKER_MODEL_AGENT_IDS:-supervisor}
+      MODEL_AGENT_IDS: ${EAP_MODEL_AGENT_IDS:-supervisor}
     networks:
       - infra
 

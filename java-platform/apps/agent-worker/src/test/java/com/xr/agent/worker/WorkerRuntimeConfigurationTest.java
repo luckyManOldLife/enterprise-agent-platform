@@ -18,7 +18,7 @@ class WorkerRuntimeConfigurationTest {
                 "POSTGRES_PASSWORD", "secret-value",
                 "WORKER_BATCH_SIZE", "25",
                 "WORKER_POLL_INTERVAL_MILLIS", "500",
-                "WORKER_MODEL_AGENT_IDS", "supervisor,order-agent"));
+                "MODEL_AGENT_IDS", "supervisor,order-agent"));
 
         assertEquals("jdbc:postgresql://postgres:5432/agent_platform", configuration.postgresUrl());
         assertEquals("agent_worker", configuration.postgresUser());
@@ -54,7 +54,7 @@ class WorkerRuntimeConfigurationTest {
                         "POSTGRES_URL", "jdbc:postgresql://database/platform",
                         "POSTGRES_USER", "agent",
                         "POSTGRES_PASSWORD", "secret",
-                        "WORKER_MODEL_AGENT_IDS", "supervisor,supervisor")));
+                        "MODEL_AGENT_IDS", "supervisor,supervisor")));
     }
 
     private static Map<String, String> requiredEnvironment() {

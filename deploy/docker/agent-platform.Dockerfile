@@ -1,5 +1,6 @@
 FROM eclipse-temurin:21-jre
 WORKDIR /app
-COPY target/agent-platform-server.jar app.jar
+COPY apps/agent-platform-server/target/agent-platform-server-*.jar app.jar
+COPY apps/agent-platform-server/target/lib/ lib/
 USER 10001
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-cp", "app.jar:lib/*", "com.xr.agent.server.AgentPlatformApplication"]

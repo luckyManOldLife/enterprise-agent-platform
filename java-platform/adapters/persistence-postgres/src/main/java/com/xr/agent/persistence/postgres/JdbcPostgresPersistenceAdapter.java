@@ -43,7 +43,10 @@ public final class JdbcPostgresPersistenceAdapter
     }
 
     @Override
-    public AgentTask saveWithOutbox(AgentTask task, TaskOutboxMessage event) {
+    public AgentTask saveWithOutbox(
+            AgentTask task,
+            TaskOutboxMessage event,
+            String idempotencyKey) {
         Objects.requireNonNull(task, "task");
         Objects.requireNonNull(event, "event");
         if (!task.taskId().equals(event.taskId())) {
@@ -51,7 +54,10 @@ public final class JdbcPostgresPersistenceAdapter
         }
 
         return inTransaction(connection -> {
-            insertTask(connection, task);
+            if (!insertTask(connection, task, normalizeIdempotencyKey(idempotencyKey))) {
+                return findByIdempotencyKey(connection, task.tenantId(), idempotencyKey)
+                        .orElseThrow(() -> new IllegalStateException("Idempotent task was not found"));
+            }
             insertOutbox(connection, event);
             return task;
         });
@@ -335,14 +341,20 @@ public final class JdbcPostgresPersistenceAdapter
         });
     }
 
-    private void insertTask(Connection connection, AgentTask task) throws SQLException {
+    private boolean insertTask(
+            Connection connection,
+            AgentTask task,
+            String idempotencyKey) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
                 INSERT INTO agent_task (
                     task_id, parent_task_id, conversation_id, trace_id, tenant_id, user_id,
                     source_agent, target_agent, status, input, output, error_code, retry_count,
-                    deadline, started_at, completed_at, version
+                    deadline, started_at, completed_at, version, idempotency_key
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (tenant_id, idempotency_key)
+                    WHERE idempotency_key IS NOT NULL
+                    DO NOTHING
                 """)) {
             statement.setObject(1, task.taskId());
             statement.setObject(2, task.parentTaskId());
@@ -361,7 +373,27 @@ public final class JdbcPostgresPersistenceAdapter
             setNullableInstant(statement, 15, task.startedAt());
             setNullableInstant(statement, 16, task.completedAt());
             statement.setLong(17, task.version());
-            statement.executeUpdate();
+            statement.setString(18, idempotencyKey);
+            return statement.executeUpdate() == 1;
+        }
+    }
+
+    private Optional<AgentTask> findByIdempotencyKey(
+            Connection connection,
+            String tenantId,
+            String idempotencyKey) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT task_id, parent_task_id, tenant_id, user_id, trace_id, conversation_id,
+                       source_agent, target_agent, status, input, output, error_code,
+                       retry_count, deadline, started_at, completed_at, version
+                  FROM agent_task
+                 WHERE tenant_id = ? AND idempotency_key = ?
+                """)) {
+            statement.setString(1, tenantId);
+            statement.setString(2, idempotencyKey);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? Optional.of(mapTask(rows)) : Optional.empty();
+            }
         }
     }
 
@@ -512,6 +544,16 @@ public final class JdbcPostgresPersistenceAdapter
         } else {
             statement.setTimestamp(index, Timestamp.from(value));
         }
+    }
+
+    private static String normalizeIdempotencyKey(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        if (value.length() > 256) {
+            throw new IllegalArgumentException("idempotencyKey must not exceed 256 characters");
+        }
+        return value;
     }
 
     private <T> T query(SqlOperation<T> operation) {

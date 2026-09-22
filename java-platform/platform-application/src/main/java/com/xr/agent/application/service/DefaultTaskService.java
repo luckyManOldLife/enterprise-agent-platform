@@ -45,7 +45,7 @@ public final class DefaultTaskService implements TaskUseCase {
                 "TASK_CREATED",
                 payload,
                 Instant.now());
-        return taskPersistence.saveWithOutbox(task, event);
+        return taskPersistence.saveWithOutbox(task, event, command.idempotencyKey());
     }
 
     @Override

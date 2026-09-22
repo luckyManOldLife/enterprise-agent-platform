@@ -17,7 +17,18 @@ import java.util.UUID;
  */
 public interface TaskPersistencePort {
 
-    AgentTask saveWithOutbox(AgentTask task, TaskOutboxMessage event);
+    /**
+     * Saves a new task and its outbox event atomically.
+     *
+     * <p>When {@code idempotencyKey} is present, implementations must enforce
+     * uniqueness within the task tenant and return the previously persisted task
+     * without adding a duplicate outbox event.</p>
+     */
+    AgentTask saveWithOutbox(AgentTask task, TaskOutboxMessage event, String idempotencyKey);
+
+    default AgentTask saveWithOutbox(AgentTask task, TaskOutboxMessage event) {
+        return saveWithOutbox(task, event, null);
+    }
 
     /**
      * Persists a state change only when the aggregate still has {@code expectedVersion}.

@@ -52,6 +52,27 @@ class InMemoryTaskPersistenceTest {
     }
 
     @Test
+    void returnsTheExistingTenantTaskForAnIdempotencyKeyWithoutAnotherEvent() {
+        InMemoryTaskPersistence persistence = new InMemoryTaskPersistence();
+        DefaultTaskService service = new DefaultTaskService(persistence);
+
+        AgentTask first = service.submit(command("tenant-a", "request-1"));
+        AgentTask repeated = service.submit(command("tenant-a", "request-1"));
+        AgentTask otherTenant = service.submit(command("tenant-b", "request-1"));
+        List<OutboxRecord> records = persistence.claim(10, Instant.now(), PROCESSING_LEASE);
+
+        assertEquals(first.taskId(), repeated.taskId());
+        assertEquals(otherTenant.taskId(), records
+                .stream()
+                .filter(record -> record.message().tenantId().equals("tenant-b"))
+                .findFirst()
+                .orElseThrow()
+                .message()
+                .taskId());
+        assertEquals(2, records.size());
+    }
+
+    @Test
     void retriesFailedEventWithAttemptCount() {
         InMemoryTaskPersistence persistence = new InMemoryTaskPersistence();
         DefaultTaskService service = new DefaultTaskService(persistence);
@@ -128,5 +149,17 @@ class InMemoryTaskPersistenceTest {
                 java.util.UUID.randomUUID(), task.taskId(), task.tenantId(),
                 task.traceId(), "TASK_CREATED", Map.of(), occurredAt);
         return persistence.saveWithOutbox(task, event);
+    }
+
+    private static TaskUseCase.SubmitTaskCommand command(String tenantId, String idempotencyKey) {
+        return new TaskUseCase.SubmitTaskCommand(
+                tenantId,
+                "user-a",
+                "trace-a",
+                "conversation-a",
+                "supervisor",
+                "order-agent",
+                Map.of(),
+                idempotencyKey);
     }
 }

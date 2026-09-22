@@ -53,17 +53,18 @@ public final class PlatformApiFacade {
                 "supervisor",
                 Map.of(
                         "input", request.input(),
-                        "roles", request.roles(),
-                        "idempotencyKey", request.idempotencyKey() == null ? "" : request.idempotencyKey())));
+                        "roles", request.roles()),
+                request.idempotencyKey()));
         return toTaskResponse(task);
     }
 
-    public TaskResponse getTask(UUID taskId) {
-        return toTaskResponse(tasks.get(Objects.requireNonNull(taskId, "taskId")));
+    public TaskResponse getTask(UUID taskId, String tenantId) {
+        AgentTask task = tenantTask(taskId, tenantId);
+        return toTaskResponse(task);
     }
 
-    public List<TaskEventResponse> streamTaskEvents(UUID taskId) {
-        Objects.requireNonNull(taskId, "taskId");
+    public List<TaskEventResponse> streamTaskEvents(UUID taskId, String tenantId) {
+        tenantTask(taskId, tenantId);
         return taskEvents.listByTask(taskId).stream()
                 .map(event -> new TaskEventResponse(
                         event.eventId(),
@@ -73,6 +74,21 @@ public final class PlatformApiFacade {
                         event.payload(),
                         event.createdAt()))
                 .toList();
+    }
+
+    private AgentTask tenantTask(UUID taskId, String tenantId) {
+        Objects.requireNonNull(taskId, "taskId");
+        requireText(tenantId, "tenantId");
+        AgentTask task;
+        try {
+            task = tasks.get(taskId);
+        } catch (IllegalArgumentException exception) {
+            throw new TenantResourceNotFoundException();
+        }
+        if (!tenantId.equals(task.tenantId())) {
+            throw new TenantResourceNotFoundException();
+        }
+        return task;
     }
 
     public List<ApprovalResponse> listApprovals(String tenantId) {
@@ -203,5 +219,12 @@ public final class PlatformApiFacade {
             throw new IllegalArgumentException(field + " must not be blank");
         }
         return value;
+    }
+
+    public static final class TenantResourceNotFoundException extends RuntimeException {
+
+        public TenantResourceNotFoundException() {
+            super("Requested resource was not found");
+        }
     }
 }

@@ -18,6 +18,26 @@ public interface TaskUseCase {
             String conversationId,
             String sourceAgent,
             String targetAgent,
-            Map<String, Object> input) {
+            Map<String, Object> input,
+            String idempotencyKey) {
+
+        public SubmitTaskCommand(
+                String tenantId,
+                String userId,
+                String traceId,
+                String conversationId,
+                String sourceAgent,
+                String targetAgent,
+                Map<String, Object> input) {
+            this(
+                    tenantId,
+                    userId,
+                    traceId,
+                    conversationId,
+                    sourceAgent,
+                    targetAgent,
+                    input,
+                    null);
+        }
     }
 }

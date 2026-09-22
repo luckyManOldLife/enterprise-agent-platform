@@ -1,5 +1,6 @@
 package com.xr.agent.worker;
 
+import com.xr.agent.persistence.postgres.DriverManagerDataSource;
 import com.xr.agent.persistence.postgres.JdbcPostgresPersistenceAdapter;
 import com.xr.agent.persistence.postgres.JdkJsonMapCodec;
 

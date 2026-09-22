@@ -51,7 +51,7 @@ final class WorkerRuntimeConfiguration {
                         environment,
                         "WORKER_POLL_INTERVAL_MILLIS",
                         Math.toIntExact(DEFAULT_POLL_INTERVAL.toMillis()))),
-                agentIds(environment.get("WORKER_MODEL_AGENT_IDS")));
+                agentIds(environment.get("MODEL_AGENT_IDS")));
     }
 
     String postgresUrl() {
@@ -109,14 +109,14 @@ final class WorkerRuntimeConfiguration {
         for (String candidate : configuredIds.split(",")) {
             String agentId = candidate.trim();
             if (!agentId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")) {
-                throw new IllegalArgumentException("WORKER_MODEL_AGENT_IDS contains an invalid agent id");
+                throw new IllegalArgumentException("MODEL_AGENT_IDS contains an invalid agent id");
             }
             if (!uniqueIds.add(agentId)) {
-                throw new IllegalArgumentException("WORKER_MODEL_AGENT_IDS must not contain duplicates");
+                throw new IllegalArgumentException("MODEL_AGENT_IDS must not contain duplicates");
             }
         }
         if (uniqueIds.isEmpty()) {
-            throw new IllegalArgumentException("WORKER_MODEL_AGENT_IDS must contain an agent id");
+            throw new IllegalArgumentException("MODEL_AGENT_IDS must contain an agent id");
         }
         return List.copyOf(new ArrayList<>(uniqueIds));
     }

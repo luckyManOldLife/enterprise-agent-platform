@@ -41,10 +41,10 @@ POSTGRES_USER=agent_worker
 POSTGRES_PASSWORD=<injected database password>
 WORKER_BATCH_SIZE=10
 WORKER_POLL_INTERVAL_MILLIS=1000
-WORKER_MODEL_AGENT_IDS=supervisor
+MODEL_AGENT_IDS=supervisor
 ```
 
-`WORKER_MODEL_AGENT_IDS` 是逗号分隔的本地模型 Agent 白名单。Worker 只会执行名单中
+`MODEL_AGENT_IDS` 是 API 与 Worker 共用的逗号分隔模型 Agent 白名单。Worker 只会执行名单中
 可用的 Agent；未知或未授权的任务会以 `AGENT_UNAVAILABLE` 结束。当前静态 Agent 使用
 `model://cliproxyapi` 端点和 `task.execute` 能力。
 

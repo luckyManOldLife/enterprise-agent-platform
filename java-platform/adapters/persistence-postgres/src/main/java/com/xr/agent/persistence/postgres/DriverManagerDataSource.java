@@ -1,4 +1,4 @@
-package com.xr.agent.worker;
+package com.xr.agent.persistence.postgres;
 
 import javax.sql.DataSource;
 import java.io.PrintWriter;
@@ -9,13 +9,16 @@ import java.sql.SQLFeatureNotSupportedException;
 import java.util.Objects;
 import java.util.logging.Logger;
 
-final class DriverManagerDataSource implements DataSource {
+/**
+ * Minimal JDBC data source for deployments that do not provide a connection pool.
+ */
+public final class DriverManagerDataSource implements DataSource {
 
     private final String url;
     private final String user;
     private final String password;
 
-    DriverManagerDataSource(String url, String user, String password) {
+    public DriverManagerDataSource(String url, String user, String password) {
         this.url = Objects.requireNonNull(url, "url");
         this.user = Objects.requireNonNull(user, "user");
         this.password = Objects.requireNonNull(password, "password");

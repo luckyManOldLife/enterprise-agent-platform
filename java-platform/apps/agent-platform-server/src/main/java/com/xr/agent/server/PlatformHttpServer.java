@@ -38,9 +38,13 @@ public final class PlatformHttpServer implements AutoCloseable {
     }
 
     public static PlatformHttpServer create(PlatformApiFacade api, int port) {
+        return create(api, "127.0.0.1", port);
+    }
+
+    public static PlatformHttpServer create(PlatformApiFacade api, String host, int port) {
         try {
             return new PlatformHttpServer(
-                    HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0),
+                    HttpServer.create(new InetSocketAddress(host, port), 0),
                     api);
         } catch (IOException exception) {
             throw new IllegalStateException("Unable to bind HTTP server", exception);
@@ -64,6 +68,10 @@ public final class PlatformHttpServer implements AutoCloseable {
     private void handle(HttpExchange exchange) {
         try {
             route(exchange);
+        } catch (PlatformApiFacade.TenantResourceNotFoundException exception) {
+            sendError(exchange, new ApiExceptionHandler.ApiError(404, Map.of(
+                    "code", "NOT_FOUND",
+                    "message", "Resource not found")));
         } catch (IllegalArgumentException exception) {
             sendError(exchange, ApiExceptionHandler.handleBadRequest(exception));
         } catch (IllegalStateException exception) {
@@ -98,12 +106,14 @@ public final class PlatformHttpServer implements AutoCloseable {
         if ("GET".equals(method) && path.startsWith("/api/tasks/")
                 && path.endsWith("/events")) {
             UUID taskId = uuidFromPath(path, "/api/tasks/", "/events");
-            sendEvents(exchange, api.streamTaskEvents(taskId));
+            String tenantId = requiredQuery(exchange.getRequestURI(), "tenantId");
+            sendEvents(exchange, api.streamTaskEvents(taskId, tenantId));
             return;
         }
         if ("GET".equals(method) && path.startsWith("/api/tasks/")) {
             UUID taskId = uuidFromPath(path, "/api/tasks/", "");
-            sendJson(exchange, 200, taskJson(api.getTask(taskId)));
+            String tenantId = requiredQuery(exchange.getRequestURI(), "tenantId");
+            sendJson(exchange, 200, taskJson(api.getTask(taskId, tenantId)));
             return;
         }
         if ("GET".equals(method) && "/api/approvals".equals(path)) {

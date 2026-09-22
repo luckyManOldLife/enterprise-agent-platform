@@ -5,7 +5,11 @@
     <artifactId>agent-platform-server</artifactId>
     <dependencies>
         <dependency><groupId>com.xr.agent</groupId><artifactId>platform-api</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>com.xr.agent</groupId><artifactId>platform-application</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>com.xr.agent</groupId><artifactId>agent-runtime</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>com.xr.agent</groupId><artifactId>agent-registry</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>com.xr.agent</groupId><artifactId>policy-engine</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>com.xr.agent</groupId><artifactId>task-service</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
     </dependencies>
 </project>

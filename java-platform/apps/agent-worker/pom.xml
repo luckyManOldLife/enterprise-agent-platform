@@ -10,6 +10,21 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
+            <groupId>com.xr.agent</groupId>
+            <artifactId>agent-registry</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.xr.agent</groupId>
+            <artifactId>model-gateway</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.xr.agent</groupId>
+            <artifactId>adapter-model-openai</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>

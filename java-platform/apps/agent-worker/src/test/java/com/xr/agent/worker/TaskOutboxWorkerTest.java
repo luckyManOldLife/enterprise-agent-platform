@@ -1,6 +1,10 @@
 package com.xr.agent.worker;
 
+import com.xr.agent.application.port.out.AgentInvokerPort;
+import com.xr.agent.application.port.out.AgentRegistryPort;
 import com.xr.agent.application.port.out.TaskPersistencePort.TaskOutboxMessage;
+import com.xr.agent.domain.model.AgentDefinition;
+import com.xr.agent.domain.model.AgentStatus;
 import com.xr.agent.domain.model.AgentTask;
 import com.xr.agent.domain.model.TaskStatus;
 import com.xr.agent.task.InMemoryTaskPersistence;
@@ -14,6 +18,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -122,6 +128,8 @@ class TaskOutboxWorkerTest {
         TaskOutboxWorker worker = new TaskOutboxWorker(
                 claimLostOnPublish,
                 persistence,
+                null,
+                null,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 LEASE,
                 RETRY_DELAY);
@@ -132,10 +140,71 @@ class TaskOutboxWorkerTest {
         assertEquals(TaskStatus.RUNNING, persistence.findById(task.taskId()).orElseThrow().status());
     }
 
+    @Test
+    void persistsTheRealAgentOutputAfterStartingTheTask() {
+        InMemoryTaskPersistence persistence = new InMemoryTaskPersistence();
+        AgentTask task = saveTask(persistence, null);
+        AgentInvokerPort invoker = (invokedTask, agent) ->
+                new AgentInvokerPort.AgentInvocationResult(true, Map.of("content", "order found"), null);
+
+        TaskOutboxWorker.BatchResult result = executingWorker(persistence, invoker).runOnce(10);
+
+        AgentTask stored = persistence.findById(task.taskId()).orElseThrow();
+        assertEquals(new TaskOutboxWorker.BatchResult(1, 1, 0), result);
+        assertEquals(TaskStatus.SUCCEEDED, stored.status());
+        assertEquals("order found", stored.output().get("content"));
+        assertEquals(2, stored.version());
+    }
+
+    @Test
+    void persistsAStableAgentFailureCode() {
+        InMemoryTaskPersistence persistence = new InMemoryTaskPersistence();
+        AgentTask task = saveTask(persistence, null);
+        AgentInvokerPort invoker = (invokedTask, agent) ->
+                new AgentInvokerPort.AgentInvocationResult(false, Map.of(), "MODEL_UPSTREAM_HTTP_429");
+
+        TaskOutboxWorker.BatchResult result = executingWorker(persistence, invoker).runOnce(10);
+
+        AgentTask stored = persistence.findById(task.taskId()).orElseThrow();
+        assertEquals(new TaskOutboxWorker.BatchResult(1, 1, 0), result);
+        assertEquals(TaskStatus.FAILED, stored.status());
+        assertEquals("MODEL_UPSTREAM_HTTP_429", stored.errorCode());
+        assertEquals(2, stored.version());
+    }
+
+    @Test
+    void doesNotPersistUntrustedAgentFailureText() {
+        InMemoryTaskPersistence persistence = new InMemoryTaskPersistence();
+        AgentTask task = saveTask(persistence, null);
+        AgentInvokerPort invoker = (invokedTask, agent) ->
+                new AgentInvokerPort.AgentInvocationResult(false, Map.of(), "upstream returned bearer token");
+
+        executingWorker(persistence, invoker).runOnce(10);
+
+        assertEquals(
+                "AGENT_INVOCATION_FAILED",
+                persistence.findById(task.taskId()).orElseThrow().errorCode());
+    }
+
     private static TaskOutboxWorker worker(InMemoryTaskPersistence persistence) {
         return new TaskOutboxWorker(
                 persistence,
                 persistence,
+                null,
+                null,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                LEASE,
+                RETRY_DELAY);
+    }
+
+    private static TaskOutboxWorker executingWorker(
+            InMemoryTaskPersistence persistence,
+            AgentInvokerPort invoker) {
+        return new TaskOutboxWorker(
+                persistence,
+                persistence,
+                new SingleAgentRegistry(agent()),
+                invoker,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 LEASE,
                 RETRY_DELAY);
@@ -187,6 +256,35 @@ class TaskOutboxWorkerTest {
         @Override
         public void markFailed(UUID eventId, UUID claimToken, String error, Instant nextAttemptAt) {
             delegate.markFailed(eventId, claimToken, error, nextAttemptAt);
+        }
+    }
+
+    private static AgentDefinition agent() {
+        return new AgentDefinition(
+                "order-agent",
+                "Order Agent",
+                "1.0.0",
+                AgentStatus.ACTIVE,
+                "model://cliproxyapi",
+                Set.of("order.read"),
+                null);
+    }
+
+    private record SingleAgentRegistry(AgentDefinition agent) implements AgentRegistryPort {
+
+        @Override
+        public void register(AgentDefinition agent) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public java.util.List<AgentDefinition> findAvailable(String tenantId) {
+            return agent.isAvailableFor(tenantId) ? java.util.List.of(agent) : java.util.List.of();
+        }
+
+        @Override
+        public Optional<AgentDefinition> findById(String agentId) {
+            return agent.agentId().equals(agentId) ? Optional.of(agent) : Optional.empty();
         }
     }
 }

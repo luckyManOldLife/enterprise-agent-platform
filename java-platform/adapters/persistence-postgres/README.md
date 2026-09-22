@@ -7,7 +7,7 @@ JDBC PostgreSQL adapter for platform persistence.
 - `TaskPersistencePort`: atomic `agent_task` + `task_outbox` insert and
   tenant-scoped optimistic task updates through `agent_task.version`.
 - `OutboxStorePort`: claim, publish and retry state transitions using
-  `FOR UPDATE SKIP LOCKED`.
+  `FOR UPDATE SKIP LOCKED`, lease recovery and claim-token ownership checks.
 - `ApprovalRepositoryPort`: persist, query and recover approval requests.
 - `TaskEventStorePort`: append and list audit events for SSE streams.
 

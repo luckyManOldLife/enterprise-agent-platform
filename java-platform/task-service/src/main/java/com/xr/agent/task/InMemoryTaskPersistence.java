@@ -4,6 +4,7 @@ import com.xr.agent.application.port.out.TaskPersistencePort;
 import com.xr.agent.domain.model.AgentTask;
 import com.xr.agent.domain.model.TaskVersionConflictException;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -79,30 +80,33 @@ public final class InMemoryTaskPersistence implements TaskPersistencePort, Outbo
     }
 
     @Override
-    public synchronized List<OutboxRecord> claim(int limit, Instant now) {
+    public synchronized List<OutboxRecord> claim(int limit, Instant now, Duration processingLease) {
         if (limit <= 0) {
             throw new IllegalArgumentException("limit must be positive");
         }
+        if (processingLease == null || processingLease.isZero() || processingLease.isNegative()) {
+            throw new IllegalArgumentException("processingLease must be positive");
+        }
         List<OutboxRecord> claimed = new ArrayList<>();
         outbox.values().stream()
-                .filter(record -> record.isClaimable(now))
+                .filter(record -> record.isClaimable(now, processingLease))
                 .sorted(Comparator.comparing(record -> record.message().occurredAt()))
                 .limit(limit)
                 .forEach(record -> {
-                    record.claim(now);
-                    claimed.add(record);
+                    record.claim(now, UUID.randomUUID(), processingLease);
+                    claimed.add(record.snapshot());
                 });
         return List.copyOf(claimed);
     }
 
     @Override
-    public void markPublished(UUID eventId, Instant publishedAt) {
-        record(eventId).markPublished(publishedAt);
+    public synchronized void markPublished(UUID eventId, UUID claimToken, Instant publishedAt) {
+        record(eventId).markPublished(claimToken, publishedAt);
     }
 
     @Override
-    public void markFailed(UUID eventId, String error, Instant nextAttemptAt) {
-        record(eventId).markFailed(error, nextAttemptAt);
+    public synchronized void markFailed(UUID eventId, UUID claimToken, String error, Instant nextAttemptAt) {
+        record(eventId).markFailed(claimToken, error, nextAttemptAt);
     }
 
     private OutboxRecord record(UUID eventId) {

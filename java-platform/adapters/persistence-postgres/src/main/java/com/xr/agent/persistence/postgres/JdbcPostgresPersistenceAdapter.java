@@ -11,10 +11,12 @@ import com.xr.agent.domain.model.ApprovalStatus;
 import com.xr.agent.domain.model.TaskStatus;
 import com.xr.agent.domain.model.TaskVersionConflictException;
 import com.xr.agent.task.OutboxRecord;
+import com.xr.agent.task.OutboxClaimLostException;
 import com.xr.agent.task.OutboxStatus;
 import com.xr.agent.task.OutboxStorePort;
 
 import javax.sql.DataSource;
+import java.time.Duration;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -127,32 +129,38 @@ public final class JdbcPostgresPersistenceAdapter
     }
 
     @Override
-    public List<OutboxRecord> claim(int limit, Instant now) {
+    public List<OutboxRecord> claim(int limit, Instant now, Duration processingLease) {
         if (limit <= 0) {
             throw new IllegalArgumentException("limit must be positive");
         }
         Objects.requireNonNull(now, "now");
+        if (processingLease == null || processingLease.isZero() || processingLease.isNegative()) {
+            throw new IllegalArgumentException("processingLease must be positive");
+        }
 
         return inTransaction(connection -> {
             List<OutboxRecord> claimed = new ArrayList<>();
             try (PreparedStatement statement = connection.prepareStatement("""
                     SELECT event_id, task_id, tenant_id, trace_id, event_type, payload,
-                           attempts, available_at, published_at, last_error, created_at
+                           attempts, available_at, claimed_at, claim_token, published_at, last_error, created_at
                       FROM task_outbox
-                     WHERE status IN ('PENDING', 'FAILED')
-                       AND available_at <= ?
+                     WHERE (status IN ('PENDING', 'FAILED') AND available_at <= ?)
+                        OR (status = 'PROCESSING' AND claimed_at <= ?)
                      ORDER BY created_at
                      LIMIT ?
                      FOR UPDATE SKIP LOCKED
                     """)) {
                 statement.setTimestamp(1, Timestamp.from(now));
-                statement.setInt(2, limit);
+                statement.setTimestamp(2, Timestamp.from(now.minus(processingLease)));
+                statement.setInt(3, limit);
                 try (ResultSet rows = statement.executeQuery()) {
                     while (rows.next()) {
                         UUID eventId = rows.getObject("event_id", UUID.class);
                         int nextAttempts = rows.getInt("attempts") + 1;
-                        updateOutboxClaim(connection, eventId, nextAttempts, now);
-                        claimed.add(mapOutbox(rows, OutboxStatus.PROCESSING, nextAttempts));
+                        UUID claimToken = UUID.randomUUID();
+                        updateOutboxClaim(connection, eventId, nextAttempts, now, claimToken);
+                        claimed.add(mapOutbox(
+                                rows, OutboxStatus.PROCESSING, nextAttempts, now, claimToken));
                     }
                 }
             }
@@ -161,34 +169,40 @@ public final class JdbcPostgresPersistenceAdapter
     }
 
     @Override
-    public void markPublished(UUID eventId, Instant publishedAt) {
+    public void markPublished(UUID eventId, UUID claimToken, Instant publishedAt) {
         Objects.requireNonNull(eventId, "eventId");
+        Objects.requireNonNull(claimToken, "claimToken");
         Objects.requireNonNull(publishedAt, "publishedAt");
         updateOutboxStatus("""
                 UPDATE task_outbox
-                   SET status = 'PUBLISHED', published_at = ?, last_error = NULL
-                 WHERE event_id = ? AND status = 'PROCESSING'
+                   SET status = 'PUBLISHED', published_at = ?, last_error = NULL,
+                       claimed_at = NULL, claim_token = NULL
+                 WHERE event_id = ? AND status = 'PROCESSING' AND claim_token = ?
                 """, statement -> {
             statement.setTimestamp(1, Timestamp.from(publishedAt));
             statement.setObject(2, eventId);
+            statement.setObject(3, claimToken);
         }, eventId);
     }
 
     @Override
-    public void markFailed(UUID eventId, String error, Instant nextAttemptAt) {
+    public void markFailed(UUID eventId, UUID claimToken, String error, Instant nextAttemptAt) {
         Objects.requireNonNull(eventId, "eventId");
+        Objects.requireNonNull(claimToken, "claimToken");
         if (error == null || error.isBlank()) {
             throw new IllegalArgumentException("error must not be blank");
         }
         Objects.requireNonNull(nextAttemptAt, "nextAttemptAt");
         updateOutboxStatus("""
                 UPDATE task_outbox
-                   SET status = 'FAILED', last_error = ?, available_at = ?
-                 WHERE event_id = ? AND status = 'PROCESSING'
+                   SET status = 'FAILED', last_error = ?, available_at = ?,
+                       claimed_at = NULL, claim_token = NULL
+                 WHERE event_id = ? AND status = 'PROCESSING' AND claim_token = ?
                 """, statement -> {
             statement.setString(1, error);
             statement.setTimestamp(2, Timestamp.from(nextAttemptAt));
             statement.setObject(3, eventId);
+            statement.setObject(4, claimToken);
         }, eventId);
     }
 
@@ -371,16 +385,22 @@ public final class JdbcPostgresPersistenceAdapter
         }
     }
 
-    private void updateOutboxClaim(Connection connection, UUID eventId, int attempts, Instant claimedAt)
+    private void updateOutboxClaim(
+            Connection connection,
+            UUID eventId,
+            int attempts,
+            Instant claimedAt,
+            UUID claimToken)
             throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
                 UPDATE task_outbox
-                   SET status = 'PROCESSING', attempts = ?, claimed_at = ?
+                   SET status = 'PROCESSING', attempts = ?, claimed_at = ?, claim_token = ?
                  WHERE event_id = ?
                 """)) {
             statement.setInt(1, attempts);
             statement.setTimestamp(2, Timestamp.from(claimedAt));
-            statement.setObject(3, eventId);
+            statement.setObject(3, claimToken);
+            statement.setObject(4, eventId);
             statement.executeUpdate();
         }
     }
@@ -406,7 +426,12 @@ public final class JdbcPostgresPersistenceAdapter
                 rows.getLong("version"));
     }
 
-    private OutboxRecord mapOutbox(ResultSet rows, OutboxStatus status, int attempts) throws SQLException {
+    private OutboxRecord mapOutbox(
+            ResultSet rows,
+            OutboxStatus status,
+            int attempts,
+            Instant claimedAt,
+            UUID claimToken) throws SQLException {
         TaskOutboxMessage message = new TaskOutboxMessage(
                 rows.getObject("event_id", UUID.class),
                 rows.getObject("task_id", UUID.class),
@@ -420,6 +445,8 @@ public final class JdbcPostgresPersistenceAdapter
                 status,
                 attempts,
                 instant(rows, "available_at"),
+                claimedAt,
+                claimToken,
                 instant(rows, "published_at"),
                 rows.getString("last_error"));
     }
@@ -458,7 +485,7 @@ public final class JdbcPostgresPersistenceAdapter
                 binder.bind(statement);
                 int updated = statement.executeUpdate();
                 if (updated != 1) {
-                    throw new IllegalStateException("Outbox event is not processing: " + eventId);
+                    throw new OutboxClaimLostException(eventId);
                 }
             }
             return null;

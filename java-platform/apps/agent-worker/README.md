@@ -49,8 +49,9 @@ WORKER_MAX_ATTEMPTS=3
 MODEL_AGENT_IDS=supervisor
 ```
 
-`MODEL_AGENT_IDS` 是 API 与 Worker 共用的逗号分隔模型 Agent 白名单。Worker 只会执行名单中
-可用的 Agent；未知或未授权的任务会以 `AGENT_UNAVAILABLE` 结束。当前静态 Agent 使用
+`MODEL_AGENT_IDS` 是 API 与 Worker 共用的逗号分隔模型 Agent seed。Worker 启动后会把
+这些 Agent upsert 到 PostgreSQL `agent_definition`，执行时再从持久化 registry 查询
+可用 Agent；未知或未授权的任务会以 `AGENT_UNAVAILABLE` 结束。当前 seed Agent 使用
 `model://cliproxyapi` 端点和 `task.execute` 能力。
 
 构建 Worker 镜像前先准备其运行时依赖：

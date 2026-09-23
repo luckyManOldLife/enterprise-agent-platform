@@ -42,6 +42,9 @@ The Worker and CLIProxyAPI must share the `infra` network, where the proxy
 resolves as `infra-cli-proxy-api`.
 Use `EAP_WORKER_MAX_ATTEMPTS` to bound recovered Outbox executions before the
 task is marked failed.
+`EAP_MODEL_AGENT_IDS` seeds the PostgreSQL `agent_definition` registry on API
+and Worker startup; it is not a separate in-memory allowlist in PostgreSQL
+runtime.
 
 Before starting the app, create the PostgreSQL database and user in the infra
 PostgreSQL container, then apply migrations from `database/schemas` and

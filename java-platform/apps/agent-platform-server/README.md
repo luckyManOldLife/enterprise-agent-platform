@@ -32,9 +32,10 @@ MODEL_AGENT_IDS=supervisor
 SERVER_HOST=0.0.0.0
 ```
 
-`MODEL_AGENT_IDS` 是 API 与 Worker 共同使用的模型 Agent 白名单，必须保持一致。任务提交
-时的 `idempotencyKey` 以租户为范围持久化，重复请求返回原任务且不会创建额外 Outbox
-记录。
+`MODEL_AGENT_IDS` 是 API 与 Worker 共同使用的模型 Agent seed。PostgreSQL 运行时启动
+后会把这些 Agent upsert 到 `agent_definition`，之后 API 查询和 Worker 执行都从持久化
+registry 读取。任务提交时的 `idempotencyKey` 以租户为范围持久化，重复请求返回原任务
+且不会创建额外 Outbox 记录。
 
 所有业务 API 都从请求头读取服务端身份上下文，而不是信任请求体或查询参数：
 

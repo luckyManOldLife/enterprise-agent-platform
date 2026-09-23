@@ -8,8 +8,9 @@ import com.xr.agent.persistence.postgres.DriverManagerDataSource;
 import com.xr.agent.persistence.postgres.JdbcPostgresPersistenceAdapter;
 import com.xr.agent.persistence.postgres.JdkJsonMapCodec;
 import com.xr.agent.policy.ApprovalWorkflowService;
-import com.xr.agent.registry.InMemoryAgentRegistry;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -26,20 +27,12 @@ final class PostgresPlatformConfiguration {
                         required(environment, "POSTGRES_USER"),
                         required(environment, "POSTGRES_PASSWORD")),
                 new JdkJsonMapCodec());
-        InMemoryAgentRegistry registry = new InMemoryAgentRegistry();
-        for (String agentId : modelAgentIds(environment.get("MODEL_AGENT_IDS"))) {
-            registry.register(new AgentDefinition(
-                    agentId,
-                    agentId,
-                    "1.0.0",
-                    AgentStatus.ACTIVE,
-                    "model://cliproxyapi",
-                    Set.of("task.execute"),
-                    null));
+        for (AgentDefinition agent : modelAgentDefinitions(environment.get("MODEL_AGENT_IDS"))) {
+            persistence.register(agent);
         }
         return new PlatformApiFacade(
                 new DefaultTaskService(persistence, persistence),
-                registry,
+                persistence,
                 new ApprovalWorkflowService(persistence),
                 persistence);
     }
@@ -55,7 +48,20 @@ final class PostgresPlatformConfiguration {
         return value;
     }
 
-    private static Set<String> modelAgentIds(String configuredIds) {
+    static List<AgentDefinition> modelAgentDefinitions(String configuredIds) {
+        return modelAgentIds(configuredIds).stream()
+                .map(agentId -> new AgentDefinition(
+                        agentId,
+                        agentId,
+                        "1.0.0",
+                        AgentStatus.ACTIVE,
+                        "model://cliproxyapi",
+                        Set.of("task.execute"),
+                        null))
+                .toList();
+    }
+
+    private static List<String> modelAgentIds(String configuredIds) {
         String raw = configuredIds == null || configuredIds.isBlank() ? "supervisor" : configuredIds;
         Set<String> agentIds = new LinkedHashSet<>();
         for (String candidate : raw.split(",")) {
@@ -67,6 +73,6 @@ final class PostgresPlatformConfiguration {
                 throw new IllegalArgumentException("MODEL_AGENT_IDS must not contain duplicates");
             }
         }
-        return Set.copyOf(agentIds);
+        return List.copyOf(new ArrayList<>(agentIds));
     }
 }

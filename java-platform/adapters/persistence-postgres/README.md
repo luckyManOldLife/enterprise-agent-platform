@@ -11,6 +11,8 @@ JDBC PostgreSQL adapter for platform persistence.
   `FOR UPDATE SKIP LOCKED`, lease recovery and claim-token ownership checks.
 - `ApprovalRepositoryPort`: persist, query and recover approval requests.
 - `TaskEventStorePort`: append and list audit events for SSE streams.
+- `AgentRegistryPort`: upsert and query `agent_definition` records with
+  tenant-scoped availability.
 
 The adapter depends on `javax.sql.DataSource` and a caller-provided
 `JsonMapCodec`; `JdkJsonMapCodec` is available for JDK-only deployments. It

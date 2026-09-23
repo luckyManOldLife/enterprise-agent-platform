@@ -23,10 +23,13 @@ final class AgentWorkerRuntime implements AutoCloseable {
                         configuration.postgresUser(),
                         configuration.postgresPassword()),
                 new JdkJsonMapCodec());
+        for (var agent : ModelAgentRegistryFactory.definitions(configuration.agentIds())) {
+            persistence.register(agent);
+        }
         TaskOutboxWorker worker = CliProxyApiWorkerConfiguration.create(
                 persistence,
                 persistence,
-                ModelAgentRegistryFactory.create(configuration.agentIds()),
+                persistence,
                 environment,
                 configuration.maxAttempts());
         return new AgentWorkerRuntime(new WorkerPollingLoop(

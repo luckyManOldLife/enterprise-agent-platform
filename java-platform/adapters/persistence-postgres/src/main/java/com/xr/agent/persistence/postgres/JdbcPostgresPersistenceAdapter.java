@@ -1,10 +1,13 @@
 package com.xr.agent.persistence.postgres;
 
 import com.xr.agent.application.port.out.ApprovalRepositoryPort;
+import com.xr.agent.application.port.out.AgentRegistryPort;
 import com.xr.agent.application.port.out.TaskEventStorePort;
 import com.xr.agent.application.port.out.TaskEventStorePort.TaskEvent;
 import com.xr.agent.application.port.out.TaskPersistencePort;
 import com.xr.agent.application.port.out.TaskPersistencePort.TaskOutboxMessage;
+import com.xr.agent.domain.model.AgentDefinition;
+import com.xr.agent.domain.model.AgentStatus;
 import com.xr.agent.domain.model.AgentTask;
 import com.xr.agent.domain.model.Approval;
 import com.xr.agent.domain.model.ApprovalStatus;
@@ -29,10 +32,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 public final class JdbcPostgresPersistenceAdapter
-        implements TaskPersistencePort, OutboxStorePort, ApprovalRepositoryPort, TaskEventStorePort {
+        implements TaskPersistencePort,
+        OutboxStorePort,
+        ApprovalRepositoryPort,
+        TaskEventStorePort,
+        AgentRegistryPort {
 
     private final DataSource dataSource;
     private final JsonMapCodec jsonCodec;
@@ -213,6 +221,88 @@ public final class JdbcPostgresPersistenceAdapter
     }
 
     @Override
+    public void register(AgentDefinition agent) {
+        Objects.requireNonNull(agent, "agent");
+        inTransaction(connection -> {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    INSERT INTO agent_definition (
+                        agent_id, name, version, status, endpoint, capabilities, tenant_scope, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, now())
+                    ON CONFLICT (agent_id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        version = EXCLUDED.version,
+                        status = EXCLUDED.status,
+                        endpoint = EXCLUDED.endpoint,
+                        capabilities = EXCLUDED.capabilities,
+                        tenant_scope = EXCLUDED.tenant_scope,
+                        updated_at = now()
+                    """)) {
+                bindAgent(statement, agent);
+                statement.executeUpdate();
+            }
+            return null;
+        });
+    }
+
+    @Override
+    public List<AgentDefinition> findAvailable(String tenantId) {
+        String tenant = tenantId == null ? "" : tenantId;
+        return query(connection -> {
+            List<AgentDefinition> agents = new ArrayList<>();
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    SELECT agent_id, name, version, status, endpoint,
+                           CASE
+                               WHEN jsonb_typeof(capabilities) = 'array'
+                               THEN jsonb_build_object('values', capabilities)
+                               ELSE capabilities
+                           END AS capabilities,
+                           tenant_scope
+                      FROM agent_definition
+                     WHERE status = 'ACTIVE'
+                       AND (tenant_scope IS NULL OR tenant_scope = '' OR tenant_scope = ?)
+                     ORDER BY agent_id
+                    """)) {
+                statement.setString(1, tenant);
+                try (ResultSet rows = statement.executeQuery()) {
+                    while (rows.next()) {
+                        agents.add(mapAgent(rows));
+                    }
+                }
+            }
+            return List.copyOf(agents);
+        });
+    }
+
+    @Override
+    public Optional<AgentDefinition> findById(String agentId) {
+        if (agentId == null || agentId.isBlank()) {
+            return Optional.empty();
+        }
+        return query(connection -> {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    SELECT agent_id, name, version, status, endpoint,
+                           CASE
+                               WHEN jsonb_typeof(capabilities) = 'array'
+                               THEN jsonb_build_object('values', capabilities)
+                               ELSE capabilities
+                           END AS capabilities,
+                           tenant_scope
+                      FROM agent_definition
+                     WHERE agent_id = ?
+                    """)) {
+                statement.setString(1, agentId);
+                try (ResultSet rows = statement.executeQuery()) {
+                    if (!rows.next()) {
+                        return Optional.empty();
+                    }
+                    return Optional.of(mapAgent(rows));
+                }
+            }
+        });
+    }
+
+    @Override
     public Approval save(Approval approval) {
         Objects.requireNonNull(approval, "approval");
         return inTransaction(connection -> {
@@ -377,6 +467,46 @@ public final class JdbcPostgresPersistenceAdapter
             statement.setString(18, idempotencyKey);
             return statement.executeUpdate() == 1;
         }
+    }
+
+    private void bindAgent(PreparedStatement statement, AgentDefinition agent) throws SQLException {
+        statement.setString(1, agent.agentId());
+        statement.setString(2, agent.name());
+        statement.setString(3, agent.version());
+        statement.setString(4, agent.status().name());
+        statement.setString(5, agent.endpoint());
+        statement.setString(6, capabilitiesJson(agent.capabilities()));
+        statement.setString(7, agent.tenantScope());
+    }
+
+    private AgentDefinition mapAgent(ResultSet rows) throws SQLException {
+        return new AgentDefinition(
+                rows.getString("agent_id"),
+                rows.getString("name"),
+                rows.getString("version"),
+                AgentStatus.valueOf(rows.getString("status")),
+                rows.getString("endpoint"),
+                capabilities(rows.getString("capabilities")),
+                rows.getString("tenant_scope"));
+    }
+
+    private String capabilitiesJson(Set<String> capabilities) {
+        return jsonCodec.toJson(Map.of("values", capabilities.stream().sorted().toList()));
+    }
+
+    private Set<String> capabilities(String json) {
+        Map<String, Object> root = jsonCodec.fromJson(json);
+        Object values = root.get("values");
+        if (!(values instanceof List<?> list)) {
+            return Set.of();
+        }
+        List<String> capabilities = new ArrayList<>();
+        for (Object value : list) {
+            if (value instanceof String capability && !capability.isBlank()) {
+                capabilities.add(capability);
+            }
+        }
+        return Set.copyOf(capabilities);
     }
 
     private Optional<AgentTask> findByIdempotencyKey(

@@ -1,6 +1,6 @@
 package com.xr.agent.server;
 
-import com.xr.agent.api.PlatformApiFacade;
+import com.xr.agent.domain.model.AgentDefinition;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -11,16 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class PostgresPlatformConfigurationTest {
 
     @Test
-    void registersTheSharedModelAgentAllowlistWithoutOpeningADatabaseConnection() {
-        PlatformApiFacade api = PostgresPlatformConfiguration.createApi(Map.of(
-                "POSTGRES_URL", "jdbc:postgresql://postgres:5432/agent_platform",
-                "POSTGRES_USER", "agent",
-                "POSTGRES_PASSWORD", "test-password",
-                "MODEL_AGENT_IDS", "supervisor,order-agent"));
+    void buildsSharedModelAgentDefinitionsWithoutOpeningADatabaseConnection() {
+        var agents = PostgresPlatformConfiguration.modelAgentDefinitions("supervisor,order-agent");
 
         assertEquals(
-                java.util.List.of("order-agent", "supervisor"),
-                api.listAgents("tenant-a").stream().map(PlatformApiFacade.AgentResponse::agentId).toList());
+                java.util.List.of("supervisor", "order-agent"),
+                agents.stream().map(AgentDefinition::agentId).toList());
+        assertEquals("model://cliproxyapi", agents.getFirst().endpoint());
     }
 
     @Test

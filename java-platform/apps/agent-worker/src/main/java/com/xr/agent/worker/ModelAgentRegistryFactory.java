@@ -15,16 +15,22 @@ final class ModelAgentRegistryFactory {
 
     static InMemoryAgentRegistry create(List<String> agentIds) {
         InMemoryAgentRegistry registry = new InMemoryAgentRegistry();
-        for (String agentId : List.copyOf(Objects.requireNonNull(agentIds, "agentIds"))) {
-            registry.register(new AgentDefinition(
-                    agentId,
-                    agentId,
-                    "1.0.0",
-                    AgentStatus.ACTIVE,
-                    "model://cliproxyapi",
-                    Set.of("task.execute"),
-                    null));
+        for (AgentDefinition definition : definitions(agentIds)) {
+            registry.register(definition);
         }
         return registry;
+    }
+
+    static List<AgentDefinition> definitions(List<String> agentIds) {
+        return List.copyOf(Objects.requireNonNull(agentIds, "agentIds")).stream()
+                .map(agentId -> new AgentDefinition(
+                        agentId,
+                        agentId,
+                        "1.0.0",
+                        AgentStatus.ACTIVE,
+                        "model://cliproxyapi",
+                        Set.of("task.execute"),
+                        null))
+                .toList();
     }
 }

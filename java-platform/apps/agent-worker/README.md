@@ -11,8 +11,24 @@
 - 每次认领都带有租约令牌；租约过期的 `PROCESSING` 记录可回收，旧令牌不能完成新认领。
 - 状态变化写入审计流：`TASK_RUNNING`、`TASK_SUCCEEDED`、`TASK_FAILED`、
   `TASK_TIMED_OUT`。
+- 模型返回单个 Tool Call 时先查 Tool Registry，再经 Policy Engine；拒绝、审批和执行
+  分别写入 Tool 级审计事件。多 Tool Call 暂以 `TOOL_CALL_UNSUPPORTED` 失败关闭。
 - 执行中的任务在 Outbox 租约过期后会继续重试；达到 `WORKER_MAX_ATTEMPTS` 后以
   `TASK_EXECUTION_ATTEMPTS_EXHAUSTED` 进入稳定失败态。
+
+## Tool 治理状态
+
+Worker 已具备 Tool Call 的策略门禁：低风险允许调用进入 `ToolExecutorPort`，高/关键风险
+创建持久化 Approval 并把任务转为 `WAITING_APPROVAL`，拒绝则以策略码失败。写工具幂等键
+由平台按 `taskId:toolId` 生成，不接受模型提供的幂等键作为授权依据。
+
+当前默认 Tool Registry 是本地 seed，覆盖订单/客户查询和售后任务创建；默认 executor
+明确 fail-closed，返回 `TOOL_EXECUTOR_UNAVAILABLE`，不会伪造业务执行成功。真正接入 MCP
+前，低风险 Tool Call 会失败关闭。
+
+此阶段还没有把 Tool 的输入 schema 发送给 CLIProxyAPI，因此不应认为模型 Tool Calling
+已端到端启用；也尚未把审批通过事件接回 Worker 以恢复并执行原始 Tool Call。审批请求会
+保存，但批准后的任务暂时停留在 `WAITING_APPROVAL`，需要后续恢复流程完成闭环。
 
 ## CLIProxyAPI 模型调用
 
@@ -46,6 +62,7 @@ POSTGRES_PASSWORD=<injected database password>
 WORKER_BATCH_SIZE=10
 WORKER_POLL_INTERVAL_MILLIS=1000
 WORKER_MAX_ATTEMPTS=3
+WORKER_APPROVAL_TTL_SECONDS=14400
 MODEL_AGENT_IDS=supervisor
 ```
 

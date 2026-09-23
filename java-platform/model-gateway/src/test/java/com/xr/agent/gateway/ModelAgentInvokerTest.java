@@ -8,11 +8,13 @@ import com.xr.agent.domain.model.AgentTask;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ModelAgentInvokerTest {
@@ -31,6 +33,28 @@ class ModelAgentInvokerTest {
         assertEquals(task.taskId().toString(), gateway.request.metadata().get("taskId"));
         assertEquals(task.tenantId(), gateway.request.metadata().get("tenantId"));
         assertTrue(gateway.request.userPrompt().contains("\"orderId\":\"o-1\""));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void preservesModelToolCallsForTheWorkerGovernancePath() {
+        Map<String, Object> arguments = new LinkedHashMap<>();
+        arguments.put("orderId", "o-1");
+        arguments.put("optionalNote", null);
+        RecordingGateway gateway = new RecordingGateway(List.of(new ModelGatewayPort.ToolCall(
+                "order.lookup",
+                arguments)));
+        ModelAgentInvoker invoker = new ModelAgentInvoker(gateway, "gpt-5.5");
+
+        AgentInvokerPort.AgentInvocationResult result = invoker.invoke(task(), agent());
+
+        List<Map<String, Object>> toolCalls = (List<Map<String, Object>>) result.output().get("toolCalls");
+        assertEquals(1, toolCalls.size());
+        assertEquals("order.lookup", toolCalls.getFirst().get("name"));
+        Map<String, Object> mappedArguments = (Map<String, Object>) toolCalls.getFirst().get("arguments");
+        assertEquals("o-1", mappedArguments.get("orderId"));
+        assertTrue(mappedArguments.containsKey("optionalNote"));
+        assertNull(mappedArguments.get("optionalNote"));
     }
 
     @Test
@@ -71,7 +95,16 @@ class ModelAgentInvokerTest {
     }
 
     private static final class RecordingGateway implements ModelGatewayPort {
+        private final List<ToolCall> toolCalls;
         private ModelRequest request;
+
+        private RecordingGateway() {
+            this(List.of());
+        }
+
+        private RecordingGateway(List<ToolCall> toolCalls) {
+            this.toolCalls = toolCalls;
+        }
 
         @Override
         public ModelResponse complete(AgentTask task, ModelRequest request) {
@@ -79,7 +112,7 @@ class ModelAgentInvokerTest {
             return new ModelResponse(
                     "gpt-5.5",
                     "completed order lookup",
-                    List.of(),
+                    toolCalls,
                     new Usage(12, 8, 20, 0));
         }
     }

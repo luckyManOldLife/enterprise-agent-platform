@@ -2,12 +2,21 @@ package com.xr.agent.worker;
 
 import com.xr.agent.application.port.out.AgentInvokerPort;
 import com.xr.agent.application.port.out.AgentRegistryPort;
+import com.xr.agent.application.port.out.ApprovalRepositoryPort;
+import com.xr.agent.application.port.out.PolicyEnginePort;
 import com.xr.agent.application.port.out.TaskEventStorePort;
 import com.xr.agent.application.port.out.TaskPersistencePort.TaskOutboxMessage;
+import com.xr.agent.application.port.out.ToolExecutorPort;
+import com.xr.agent.application.port.out.ToolRegistryPort;
 import com.xr.agent.domain.model.AgentDefinition;
 import com.xr.agent.domain.model.AgentStatus;
 import com.xr.agent.domain.model.AgentTask;
+import com.xr.agent.domain.model.Approval;
+import com.xr.agent.domain.model.ApprovalStatus;
+import com.xr.agent.domain.model.RiskLevel;
 import com.xr.agent.domain.model.TaskStatus;
+import com.xr.agent.domain.model.ToolDefinition;
+import com.xr.agent.policy.RuleBasedPolicyEngine;
 import com.xr.agent.task.InMemoryTaskPersistence;
 import com.xr.agent.task.OutboxClaimLostException;
 import com.xr.agent.task.OutboxRecord;
@@ -18,13 +27,17 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TaskOutboxWorkerTest {
@@ -227,6 +240,177 @@ class TaskOutboxWorkerTest {
         assertEquals(java.util.List.of("TASK_FAILED"), events.eventTypes());
     }
 
+    @Test
+    void executesAnAllowedToolCallAndPersistsTheToolResult() {
+        InMemoryTaskPersistence persistence = new InMemoryTaskPersistence();
+        RecordingTaskEventStore events = new RecordingTaskEventStore();
+        AgentTask task = saveTask(persistence, null);
+        Map<String, Object> toolArguments = new LinkedHashMap<>();
+        toolArguments.put("orderId", "o-1");
+        toolArguments.put("optionalNote", null);
+        AgentInvokerPort invoker = (invokedTask, agent) -> new AgentInvokerPort.AgentInvocationResult(
+                true,
+                Map.of(
+                        "content", "lookup order",
+                        "toolCalls", List.of(Map.of(
+                                "name", "order.lookup",
+                                "arguments", toolArguments))),
+                null);
+        AtomicReference<Map<String, Object>> executedArguments = new AtomicReference<>();
+        ToolExecutorPort executor = (invokedTask, tool, arguments) -> {
+            executedArguments.set(arguments);
+            return new ToolExecutorPort.ToolExecutionResult(
+                    true,
+                    Map.of("orderId", arguments.get("orderId"), "status", "FOUND"),
+                    null);
+        };
+
+        TaskOutboxWorker.BatchResult result = governedWorker(
+                persistence,
+                events,
+                invoker,
+                toolRegistry(lowRiskTool("order.lookup", "order.read")),
+                RuleBasedPolicyEngine.defaults(),
+                executor,
+                new RecordingApprovalRepository())
+                .runOnce(10);
+
+        AgentTask stored = persistence.findById(task.taskId()).orElseThrow();
+        assertEquals(new TaskOutboxWorker.BatchResult(1, 1, 0), result);
+        assertEquals(TaskStatus.SUCCEEDED, stored.status());
+        assertEquals(Map.of("orderId", "o-1", "status", "FOUND"), stored.output().get("toolResult"));
+        assertEquals(task.taskId() + ":order.lookup", executedArguments.get().get("idempotencyKey"));
+        assertTrue(executedArguments.get().containsKey("optionalNote"));
+        assertNull(executedArguments.get().get("optionalNote"));
+        assertEquals(java.util.List.of(
+                "TASK_RUNNING",
+                "TOOL_POLICY_ALLOWED",
+                "TASK_SUCCEEDED",
+                "TOOL_EXECUTED"), events.eventTypes());
+    }
+
+    @Test
+    void failsClosedWhenTheToolExecutorIsUnavailable() {
+        InMemoryTaskPersistence persistence = new InMemoryTaskPersistence();
+        AgentTask task = saveTask(
+                persistence,
+                null,
+                Map.of("roles", List.of("agent.write", "operator")));
+        AgentInvokerPort invoker = (invokedTask, agent) -> new AgentInvokerPort.AgentInvocationResult(
+                true,
+                Map.of("toolCalls", List.of(Map.of(
+                        "name", "support.create-task",
+                        "arguments", Map.of()))),
+                null);
+
+        governedWorker(
+                persistence,
+                null,
+                invoker,
+                toolRegistry(lowRiskTool("support.create-task", "support.write")),
+                RuleBasedPolicyEngine.defaults(),
+                new LocalToolExecutor(),
+                new RecordingApprovalRepository())
+                .runOnce(10);
+
+        AgentTask stored = persistence.findById(task.taskId()).orElseThrow();
+        assertEquals(TaskStatus.FAILED, stored.status());
+        assertEquals("TOOL_EXECUTOR_UNAVAILABLE", stored.errorCode());
+    }
+
+    @Test
+    void deniesAWriteToolCallWithoutTheRequiredRole() {
+        InMemoryTaskPersistence persistence = new InMemoryTaskPersistence();
+        RecordingTaskEventStore events = new RecordingTaskEventStore();
+        AgentTask task = saveTask(persistence, null);
+        AgentInvokerPort invoker = (invokedTask, agent) -> new AgentInvokerPort.AgentInvocationResult(
+                true,
+                Map.of("toolCalls", List.of(Map.of(
+                        "name", "support.create-task",
+                        "arguments", Map.of("idempotencyKey", "support-o-1")))),
+                null);
+
+        governedWorker(
+                persistence,
+                events,
+                invoker,
+                toolRegistry(highRiskTool("support.create-task", "support.write")),
+                RuleBasedPolicyEngine.defaults(),
+                failingExecutor(),
+                new RecordingApprovalRepository())
+                .runOnce(10);
+
+        AgentTask stored = persistence.findById(task.taskId()).orElseThrow();
+        assertEquals(TaskStatus.FAILED, stored.status());
+        assertEquals("POLICY_WRITE_ROLE_REQUIRED", stored.errorCode());
+        assertTrue(events.eventTypes().contains("TOOL_POLICY_DENIED"));
+    }
+
+    @Test
+    void requestsApprovalForAHighRiskToolCall() {
+        InMemoryTaskPersistence persistence = new InMemoryTaskPersistence();
+        RecordingTaskEventStore events = new RecordingTaskEventStore();
+        RecordingApprovalRepository approvals = new RecordingApprovalRepository();
+        AgentTask task = saveTask(
+                persistence,
+                null,
+                Map.of("roles", List.of("agent.write")));
+        AgentInvokerPort invoker = (invokedTask, agent) -> new AgentInvokerPort.AgentInvocationResult(
+                true,
+                Map.of("toolCalls", List.of(Map.of(
+                        "name", "support.create-task",
+                        "arguments", Map.of("idempotencyKey", "support-o-1")))),
+                null);
+
+        TaskOutboxWorker.BatchResult result = governedWorker(
+                persistence,
+                events,
+                invoker,
+                toolRegistry(highRiskTool("support.create-task", "support.write")),
+                RuleBasedPolicyEngine.defaults(),
+                failingExecutor(),
+                approvals)
+                .runOnce(10);
+
+        AgentTask stored = persistence.findById(task.taskId()).orElseThrow();
+        assertEquals(new TaskOutboxWorker.BatchResult(1, 1, 0), result);
+        assertEquals(TaskStatus.WAITING_APPROVAL, stored.status());
+        assertEquals(1, approvals.findPendingByTenant(task.tenantId()).size());
+        assertEquals(java.util.List.of(
+                "TASK_RUNNING",
+                "TOOL_POLICY_ALLOWED",
+                "TASK_WAITING_APPROVAL",
+                "TOOL_APPROVAL_REQUESTED"), events.eventTypes());
+    }
+
+    @Test
+    void failsAnUnknownToolCallWithAStableCode() {
+        InMemoryTaskPersistence persistence = new InMemoryTaskPersistence();
+        RecordingTaskEventStore events = new RecordingTaskEventStore();
+        AgentTask task = saveTask(persistence, null);
+        AgentInvokerPort invoker = (invokedTask, agent) -> new AgentInvokerPort.AgentInvocationResult(
+                true,
+                Map.of("toolCalls", List.of(Map.of(
+                        "name", "missing.tool",
+                        "arguments", Map.of()))),
+                null);
+
+        governedWorker(
+                persistence,
+                events,
+                invoker,
+                toolRegistry(lowRiskTool("order.lookup", "order.read")),
+                RuleBasedPolicyEngine.defaults(),
+                failingExecutor(),
+                new RecordingApprovalRepository())
+                .runOnce(10);
+
+        AgentTask stored = persistence.findById(task.taskId()).orElseThrow();
+        assertEquals(TaskStatus.FAILED, stored.status());
+        assertEquals("TOOL_UNAVAILABLE", stored.errorCode());
+        assertTrue(events.eventTypes().contains("TOOL_FAILED"));
+    }
+
     private static TaskOutboxWorker worker(InMemoryTaskPersistence persistence) {
         return worker(persistence, null);
     }
@@ -276,7 +460,39 @@ class TaskOutboxWorkerTest {
                 maxAttempts);
     }
 
+    private static TaskOutboxWorker governedWorker(
+            InMemoryTaskPersistence persistence,
+            TaskEventStorePort events,
+            AgentInvokerPort invoker,
+            ToolRegistryPort toolRegistry,
+            PolicyEnginePort policyEngine,
+            ToolExecutorPort toolExecutor,
+            ApprovalRepositoryPort approvals) {
+        return new TaskOutboxWorker(
+                persistence,
+                persistence,
+                events,
+                new SingleAgentRegistry(agent()),
+                invoker,
+                toolRegistry,
+                policyEngine,
+                toolExecutor,
+                approvals,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                LEASE,
+                RETRY_DELAY,
+                Duration.ofHours(1),
+                TaskOutboxWorker.DEFAULT_MAX_ATTEMPTS);
+    }
+
     private static AgentTask saveTask(InMemoryTaskPersistence persistence, Instant deadline) {
+        return saveTask(persistence, deadline, Map.of());
+    }
+
+    private static AgentTask saveTask(
+            InMemoryTaskPersistence persistence,
+            Instant deadline,
+            Map<String, Object> input) {
         AgentTask task = AgentTask.create(
                 "tenant-a",
                 "user-a",
@@ -284,7 +500,7 @@ class TaskOutboxWorkerTest {
                 "conversation-a",
                 "supervisor",
                 "order-agent",
-                Map.of(),
+                input,
                 deadline);
         TaskOutboxMessage event = new TaskOutboxMessage(
                 UUID.randomUUID(),
@@ -295,6 +511,47 @@ class TaskOutboxWorkerTest {
                 Map.of("targetAgent", task.targetAgent()),
                 NOW);
         return persistence.saveWithOutbox(task, event);
+    }
+
+    private static ToolRegistryPort toolRegistry(ToolDefinition... tools) {
+        return new ToolRegistryPort() {
+            @Override
+            public void register(ToolDefinition tool) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public java.util.List<ToolDefinition> findByCapability(String capability) {
+                return java.util.Arrays.stream(tools)
+                        .filter(tool -> tool.capabilities().contains(capability))
+                        .toList();
+            }
+
+            @Override
+            public Optional<ToolDefinition> findById(String toolId) {
+                return java.util.Arrays.stream(tools)
+                        .filter(tool -> tool.toolId().equals(toolId))
+                        .findFirst();
+            }
+        };
+    }
+
+    private static ToolDefinition lowRiskTool(String id, String capability) {
+        return tool(id, RiskLevel.LOW, capability);
+    }
+
+    private static ToolDefinition highRiskTool(String id, String capability) {
+        return tool(id, RiskLevel.HIGH, capability);
+    }
+
+    private static ToolDefinition tool(String id, RiskLevel riskLevel, String capability) {
+        return new ToolDefinition(id, id, "1.0.0", riskLevel, Set.of(capability), true);
+    }
+
+    private static ToolExecutorPort failingExecutor() {
+        return (task, tool, arguments) -> {
+            throw new AssertionError("tool should not execute");
+        };
     }
 
     private static final class ClaimLostOnPublishStore implements OutboxStorePort {
@@ -371,6 +628,40 @@ class TaskOutboxWorkerTest {
 
         private java.util.List<String> eventTypes() {
             return events.stream().map(TaskEvent::eventType).toList();
+        }
+    }
+
+    private static final class RecordingApprovalRepository implements ApprovalRepositoryPort {
+        private final CopyOnWriteArrayList<Approval> approvals = new CopyOnWriteArrayList<>();
+
+        @Override
+        public Approval save(Approval approval) {
+            approvals.removeIf(existing -> existing.approvalId().equals(approval.approvalId()));
+            approvals.add(approval);
+            return approval;
+        }
+
+        @Override
+        public Optional<Approval> findApprovalById(UUID approvalId) {
+            return approvals.stream()
+                    .filter(approval -> approval.approvalId().equals(approvalId))
+                    .findFirst();
+        }
+
+        @Override
+        public java.util.List<Approval> findPendingByTenant(String tenantId) {
+            return approvals.stream()
+                    .filter(approval -> approval.status() == ApprovalStatus.PENDING)
+                    .filter(approval -> approval.tenantId().equals(tenantId))
+                    .toList();
+        }
+
+        @Override
+        public java.util.List<Approval> findExpiredPending(Instant now) {
+            return approvals.stream()
+                    .filter(approval -> approval.status() == ApprovalStatus.PENDING)
+                    .filter(approval -> !approval.expiresAt().isAfter(now))
+                    .toList();
         }
     }
 }

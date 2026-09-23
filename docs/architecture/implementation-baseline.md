@@ -6,6 +6,7 @@
 - `platform-domain`：Agent、Task、Tool、Approval、领域事件和任务状态机。
 - `platform-application`：任务提交用例以及 Repository、Registry、Policy、Tool、Model 端口。
 - `policy-engine`：高风险审批、写权限和幂等键的首个纯 Java 规则实现；审批请求持久化端口、内存仓储和恢复工作流。
+- `apps/agent-worker`：模型 Tool Call 单调用治理骨架，经过 Tool Registry、Policy Engine、审批持久化或 `ToolExecutorPort`，并记录 Tool 审计事件；默认执行器 fail-closed。
 - `task-service`：任务与 `TASK_CREATED` Outbox 事件的原子持久化端口，以及本地内存适配器。
 - `agent-runtime`：Supervisor 顺序编排骨架、Agent 调用端口、子任务上下文继承和失败收敛。
 - `adapters/persistence-postgres`：JDBC PostgreSQL 适配器，覆盖任务、Outbox 和审批请求持久化。
@@ -19,12 +20,15 @@
 只能通过 `model-gateway` 与 `adapters/spring-ai-2` 接入。Python 服务不拥有平台
 任务状态，也不能绕过 Policy Engine 执行高风险写操作。
 
-## 环境状态
+## 验证状态
 
-当前服务器尚未安装 `java`、`javac` 和 `mvn`。所有 POM 已完成 XML 解析和模块路径
-核验，但 Java 编译、JUnit 执行和 Spring Boot 启动验证必须在安装 JDK/Maven 后完成。
+截至 2026-09-23，JDK 21 与 Maven Wrapper 可用。全量 `./mvnw test` 和
+`./mvnw package -DskipTests` 已通过；5 项本机 HTTP socket 测试因运行环境限制跳过。
+生产 MCP Tool 调用仍未接入或验证。
 
-## 下一批实现
+## 后续实现
 
-1. 在 `platform-api` 接入租户鉴权和 Spring Controller 适配层。
-2. 安装 JDK/Maven 后执行全量构建，再引入 Spring Boot 和 Spring AI 依赖。
+1. 为 Tool Registry 持久化输入/输出 schema、权限、超时、重试和租户范围，并将可用 Tool 声明传给模型 Gateway。
+2. 接入真实 MCP Tool Executor，校验参数 schema、租户边界、超时与下游幂等。
+3. 将审批决定事件接回任务执行器；审批通过后恢复并重新校验策略，再执行待审批 Tool Call。
+4. 用 PostgreSQL 集成测试覆盖任务/审批原子性、Outbox 重投、审批恢复及审计顺序。

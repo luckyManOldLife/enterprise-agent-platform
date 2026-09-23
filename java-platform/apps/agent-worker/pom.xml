@@ -21,6 +21,16 @@
         </dependency>
         <dependency>
             <groupId>com.xr.agent</groupId>
+            <artifactId>policy-engine</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.xr.agent</groupId>
+            <artifactId>tool-registry</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.xr.agent</groupId>
             <artifactId>adapter-model-openai</artifactId>
             <version>${project.version}</version>
         </dependency>

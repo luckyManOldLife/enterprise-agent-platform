@@ -10,10 +10,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
-import java.net.URI;
-import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -92,40 +89,42 @@ public final class PlatformHttpServer implements AutoCloseable {
             return;
         }
         if ("GET".equals(method) && "/api/agents".equals(path)) {
-            String tenantId = requiredQuery(exchange.getRequestURI(), "tenantId");
-            sendJson(exchange, 200, api.listAgents(tenantId).stream()
+            RequestContext context = RequestContext.requireTenant(exchange.getRequestHeaders());
+            sendJson(exchange, 200, api.listAgents(context.tenantId()).stream()
                     .map(PlatformHttpServer::agentJson)
                     .toList());
             return;
         }
         if ("POST".equals(method) && "/api/tasks".equals(path)) {
-            PlatformApiFacade.CreateTaskRequest request = parseCreateTask(readBody(exchange));
+            RequestContext context = RequestContext.requireActor(exchange.getRequestHeaders());
+            PlatformApiFacade.CreateTaskRequest request = parseCreateTask(readBody(exchange), context);
             sendJson(exchange, 202, taskJson(api.createTask(request)));
             return;
         }
         if ("GET".equals(method) && path.startsWith("/api/tasks/")
                 && path.endsWith("/events")) {
             UUID taskId = uuidFromPath(path, "/api/tasks/", "/events");
-            String tenantId = requiredQuery(exchange.getRequestURI(), "tenantId");
-            sendEvents(exchange, api.streamTaskEvents(taskId, tenantId));
+            RequestContext context = RequestContext.requireTenant(exchange.getRequestHeaders());
+            sendEvents(exchange, api.streamTaskEvents(taskId, context.tenantId()));
             return;
         }
         if ("GET".equals(method) && path.startsWith("/api/tasks/")) {
             UUID taskId = uuidFromPath(path, "/api/tasks/", "");
-            String tenantId = requiredQuery(exchange.getRequestURI(), "tenantId");
-            sendJson(exchange, 200, taskJson(api.getTask(taskId, tenantId)));
+            RequestContext context = RequestContext.requireTenant(exchange.getRequestHeaders());
+            sendJson(exchange, 200, taskJson(api.getTask(taskId, context.tenantId())));
             return;
         }
         if ("GET".equals(method) && "/api/approvals".equals(path)) {
-            String tenantId = requiredQuery(exchange.getRequestURI(), "tenantId");
-            sendJson(exchange, 200, api.listApprovals(tenantId).stream()
+            RequestContext context = RequestContext.requireTenant(exchange.getRequestHeaders());
+            sendJson(exchange, 200, api.listApprovals(context.tenantId()).stream()
                     .map(PlatformHttpServer::approvalJson)
                     .toList());
             return;
         }
         if ("POST".equals(method) && path.startsWith("/api/approvals/")) {
             UUID approvalId = uuidFromPath(path, "/api/approvals/", "");
-            PlatformApiFacade.ApprovalDecisionRequest request = parseApprovalDecision(readBody(exchange));
+            RequestContext context = RequestContext.requireActor(exchange.getRequestHeaders());
+            PlatformApiFacade.ApprovalDecisionRequest request = parseApprovalDecision(readBody(exchange), context);
             sendJson(exchange, 200, approvalJson(api.decideApproval(approvalId, request)));
             return;
         }
@@ -171,49 +170,26 @@ public final class PlatformHttpServer implements AutoCloseable {
         }
     }
 
-    private static PlatformApiFacade.CreateTaskRequest parseCreateTask(String body) {
+    private static PlatformApiFacade.CreateTaskRequest parseCreateTask(String body, RequestContext context) {
         Map<String, Object> json = JsonSupport.parseObject(body);
         return new PlatformApiFacade.CreateTaskRequest(
-                requiredString(json, "tenantId"),
-                requiredString(json, "userId"),
-                optionalString(json, "traceId"),
+                context.tenantId(),
+                context.userId(),
+                context.traceId(),
                 optionalString(json, "conversationId"),
-                stringList(json.get("roles")),
+                context.roles(),
                 requiredString(json, "input"),
                 optionalString(json, "idempotencyKey"));
     }
 
-    private static PlatformApiFacade.ApprovalDecisionRequest parseApprovalDecision(String body) {
+    private static PlatformApiFacade.ApprovalDecisionRequest parseApprovalDecision(
+            String body,
+            RequestContext context) {
         Map<String, Object> json = JsonSupport.parseObject(body);
         return new PlatformApiFacade.ApprovalDecisionRequest(
-                requiredString(json, "tenantId"),
-                requiredString(json, "actor"),
+                context.tenantId(),
+                context.userId(),
                 ApprovalUseCase.ApprovalDecision.valueOf(requiredString(json, "decision")));
-    }
-
-    private static String requiredQuery(URI uri, String key) {
-        String value = query(uri).get(key);
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(key + " must not be blank");
-        }
-        return value;
-    }
-
-    private static Map<String, String> query(URI uri) {
-        Map<String, String> values = new LinkedHashMap<>();
-        String rawQuery = uri.getRawQuery();
-        if (rawQuery == null || rawQuery.isBlank()) {
-            return values;
-        }
-        for (String pair : rawQuery.split("&")) {
-            String[] parts = pair.split("=", 2);
-            String key = URLDecoder.decode(parts[0], StandardCharsets.UTF_8);
-            String value = parts.length == 1
-                    ? ""
-                    : URLDecoder.decode(parts[1], StandardCharsets.UTF_8);
-            values.put(key, value);
-        }
-        return values;
     }
 
     private static UUID uuidFromPath(String path, String prefix, String suffix) {
@@ -255,23 +231,6 @@ public final class PlatformHttpServer implements AutoCloseable {
             throw new IllegalArgumentException(key + " must be a string");
         }
         return string;
-    }
-
-    private static List<String> stringList(Object value) {
-        if (value == null) {
-            return List.of();
-        }
-        if (!(value instanceof List<?> values)) {
-            throw new IllegalArgumentException("roles must be an array");
-        }
-        List<String> strings = new ArrayList<>();
-        for (Object item : values) {
-            if (!(item instanceof String string)) {
-                throw new IllegalArgumentException("roles must contain strings");
-            }
-            strings.add(string);
-        }
-        return List.copyOf(strings);
     }
 
     private static Map<String, Object> agentJson(PlatformApiFacade.AgentResponse agent) {

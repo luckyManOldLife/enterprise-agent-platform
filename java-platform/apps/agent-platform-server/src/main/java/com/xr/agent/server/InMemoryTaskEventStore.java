@@ -4,21 +4,22 @@ import com.xr.agent.application.port.out.TaskEventStorePort;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 
 final class InMemoryTaskEventStore implements TaskEventStorePort {
 
-    private final List<TaskEvent> events = new CopyOnWriteArrayList<>();
+    private final Map<UUID, TaskEvent> events = new ConcurrentHashMap<>();
 
     @Override
     public void append(TaskEvent event) {
-        events.add(event);
+        events.putIfAbsent(event.eventId(), event);
     }
 
     @Override
     public List<TaskEvent> listByTask(UUID taskId) {
-        return events.stream()
+        return events.values().stream()
                 .filter(event -> event.taskId().equals(taskId))
                 .sorted(Comparator.comparing(TaskEvent::createdAt))
                 .toList();

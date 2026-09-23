@@ -13,6 +13,15 @@
 
 任务创建请求：
 
+请求身份由服务端上下文头传入，Body 中不接收租户和用户：
+
+```http
+X-Tenant-Id: demo
+X-User-Id: u-1001
+X-Trace-Id: trace-1001
+X-Roles: support_operator
+```
+
 ```json
-{"tenantId":"demo","userId":"u-1001","roles":["support_operator"],"input":"查询客户 CUST-1001 最近订单并创建售后任务"}
+{"input":"查询客户 CUST-1001 最近订单并创建售后任务","idempotencyKey":"task-1001"}
 ```

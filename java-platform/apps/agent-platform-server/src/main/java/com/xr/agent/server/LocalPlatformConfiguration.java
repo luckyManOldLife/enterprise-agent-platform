@@ -3,9 +3,7 @@ package com.xr.agent.server;
 import com.xr.agent.api.PlatformApiFacade;
 import com.xr.agent.application.port.in.ApprovalUseCase;
 import com.xr.agent.application.port.in.TaskUseCase;
-import com.xr.agent.application.port.out.AgentRegistryPort;
 import com.xr.agent.application.port.out.TaskEventStorePort;
-import com.xr.agent.application.port.out.TaskPersistencePort;
 import com.xr.agent.registry.InMemoryAgentRegistry;
 import com.xr.agent.domain.model.AgentDefinition;
 import com.xr.agent.domain.model.AgentStatus;
@@ -23,7 +21,8 @@ public final class LocalPlatformConfiguration {
 
     public static PlatformApiFacade createApi() {
         InMemoryTaskPersistence taskPersistence = new InMemoryTaskPersistence();
-        TaskUseCase taskUseCase = new DefaultTaskService(taskPersistence);
+        TaskEventStorePort taskEventStore = new InMemoryTaskEventStore();
+        TaskUseCase taskUseCase = new DefaultTaskService(taskPersistence, taskEventStore);
         InMemoryAgentRegistry registry = new InMemoryAgentRegistry();
         registry.register(new AgentDefinition(
                 "supervisor",
@@ -34,7 +33,6 @@ public final class LocalPlatformConfiguration {
                 Set.of("task.plan"),
                 null));
         ApprovalUseCase approvalUseCase = new ApprovalWorkflowService(new InMemoryApprovalRepository());
-        TaskEventStorePort taskEventStore = new InMemoryTaskEventStore();
         return new PlatformApiFacade(taskUseCase, registry, approvalUseCase, taskEventStore);
     }
 }

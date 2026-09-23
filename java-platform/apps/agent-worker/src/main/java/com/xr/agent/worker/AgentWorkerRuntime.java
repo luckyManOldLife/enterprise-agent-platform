@@ -27,7 +27,8 @@ final class AgentWorkerRuntime implements AutoCloseable {
                 persistence,
                 persistence,
                 ModelAgentRegistryFactory.create(configuration.agentIds()),
-                environment);
+                environment,
+                configuration.maxAttempts());
         return new AgentWorkerRuntime(new WorkerPollingLoop(
                 worker::runOnce,
                 configuration.batchSize(),

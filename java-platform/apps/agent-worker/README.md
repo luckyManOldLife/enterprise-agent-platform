@@ -9,6 +9,10 @@
 - 使用任务版本号处理并发更新，重复投递在任务不再是 `CREATED` 时幂等完成。
 - 失败记录固定错误码并按退避时间重试，不持久化外部异常详情。
 - 每次认领都带有租约令牌；租约过期的 `PROCESSING` 记录可回收，旧令牌不能完成新认领。
+- 状态变化写入审计流：`TASK_RUNNING`、`TASK_SUCCEEDED`、`TASK_FAILED`、
+  `TASK_TIMED_OUT`。
+- 执行中的任务在 Outbox 租约过期后会继续重试；达到 `WORKER_MAX_ATTEMPTS` 后以
+  `TASK_EXECUTION_ATTEMPTS_EXHAUSTED` 进入稳定失败态。
 
 ## CLIProxyAPI 模型调用
 
@@ -41,6 +45,7 @@ POSTGRES_USER=agent_worker
 POSTGRES_PASSWORD=<injected database password>
 WORKER_BATCH_SIZE=10
 WORKER_POLL_INTERVAL_MILLIS=1000
+WORKER_MAX_ATTEMPTS=3
 MODEL_AGENT_IDS=supervisor
 ```
 

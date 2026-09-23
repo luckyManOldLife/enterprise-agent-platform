@@ -38,7 +38,7 @@ final class PostgresPlatformConfiguration {
                     null));
         }
         return new PlatformApiFacade(
-                new DefaultTaskService(persistence),
+                new DefaultTaskService(persistence, persistence),
                 registry,
                 new ApprovalWorkflowService(persistence),
                 persistence);

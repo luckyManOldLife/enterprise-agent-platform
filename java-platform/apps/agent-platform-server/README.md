@@ -36,8 +36,20 @@ SERVER_HOST=0.0.0.0
 时的 `idempotencyKey` 以租户为范围持久化，重复请求返回原任务且不会创建额外 Outbox
 记录。
 
+所有业务 API 都从请求头读取服务端身份上下文，而不是信任请求体或查询参数：
+
+```text
+X-Tenant-Id=tenant-a
+X-User-Id=user-a
+X-Trace-Id=trace-a
+X-Roles=support_operator,approver
+```
+
+`X-Tenant-Id` 对查询接口必填；`X-User-Id` 对任务创建和审批决策必填。
+
 服务默认监听 `127.0.0.1:8080`，可通过 `-Dserver.port=8081` 或 `PORT=8081` 覆盖；
 容器运行必须设置 `SERVER_HOST=0.0.0.0`。
 已实现 `/healthz`、`/api/agents`、`/api/tasks`、`/api/tasks/{taskId}`、
-`/api/tasks/{taskId}/events` 和审批查询/决策路由。任务详情和事件流请求必须带
-`tenantId` 查询参数，例如 `/api/tasks/{taskId}?tenantId=tenant-a`。
+`/api/tasks/{taskId}/events` 和审批查询/决策路由。任务创建会写入 `TASK_CREATED`
+审计事件，Worker 状态变化会继续写入 `TASK_RUNNING`、`TASK_SUCCEEDED`、
+`TASK_FAILED` 或 `TASK_TIMED_OUT`。

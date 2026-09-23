@@ -299,6 +299,7 @@ public final class JdbcPostgresPersistenceAdapter
                         event_id, task_id, trace_id, event_type, actor_type, payload, created_at
                     )
                     VALUES (?, ?, ?, ?, ?, ?::jsonb, ?)
+                    ON CONFLICT (event_id) DO NOTHING
                     """)) {
                 statement.setObject(1, event.eventId());
                 statement.setObject(2, event.taskId());

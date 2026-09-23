@@ -41,11 +41,11 @@ class PlatformHttpServerTest {
 
     @Test
     void servesHealthAndTenantScopedAgents() throws Exception {
-        HttpResponse<String> health = get("/healthz");
+        HttpResponse<String> health = request("/healthz").GET().send();
         assertEquals(200, health.statusCode());
         assertTrue(health.body().contains("\"status\":\"UP\""));
 
-        HttpResponse<String> agents = get("/api/agents?tenantId=tenant-a");
+        HttpResponse<String> agents = request("/api/agents").tenant("tenant-a").GET().send();
         assertEquals(200, agents.statusCode());
         assertTrue(agents.body().contains("\"agentId\":\"supervisor\""));
     }
@@ -54,8 +54,6 @@ class PlatformHttpServerTest {
     void acceptsTaskCreationAndReturnsTraceContext() throws Exception {
         HttpResponse<String> response = post("/api/tasks", """
                 {
-                  "tenantId": "tenant-a",
-                  "userId": "user-a",
                   "roles": ["support_operator"],
                   "input": "query recent orders"
                 }
@@ -71,8 +69,6 @@ class PlatformHttpServerTest {
     void rejectsMalformedTaskRequest() throws Exception {
         HttpResponse<String> response = post("/api/tasks", """
                 {
-                  "tenantId": "tenant-a",
-                  "userId": "user-a",
                   "input": " "
                 }
                 """);
@@ -81,22 +77,83 @@ class PlatformHttpServerTest {
         assertTrue(response.body().contains("\"code\":\"BAD_REQUEST\""));
     }
 
-    private HttpResponse<String> get(String path) throws Exception {
-        return client.send(
-                HttpRequest.newBuilder(uri(path)).GET().build(),
-                HttpResponse.BodyHandlers.ofString());
+    @Test
+    void rejectsTaskCreationWithoutServerSideIdentityHeaders() throws Exception {
+        HttpResponse<String> response = request("/api/tasks")
+                .POST("""
+                        {"input": "query recent orders"}
+                        """)
+                .send();
+
+        assertEquals(400, response.statusCode());
+        assertTrue(response.body().contains("X-Tenant-Id header must not be blank"));
+    }
+
+    @Test
+    void ignoresBodyTenantAndUserWhenHeadersArePresent() throws Exception {
+        HttpResponse<String> response = request("/api/tasks")
+                .tenant("tenant-a")
+                .user("user-a")
+                .POST("""
+                        {
+                          "tenantId": "tenant-b",
+                          "userId": "user-b",
+                          "input": "query recent orders"
+                        }
+                        """)
+                .send();
+
+        assertEquals(202, response.statusCode());
+        assertTrue(response.body().contains("\"tenantId\":\"tenant-a\""));
+        assertTrue(response.body().contains("\"userId\":\"user-a\""));
     }
 
     private HttpResponse<String> post(String path, String body) throws Exception {
-        return client.send(
-                HttpRequest.newBuilder(uri(path))
-                        .header("Content-Type", "application/json")
-                        .POST(HttpRequest.BodyPublishers.ofString(body))
-                        .build(),
-                HttpResponse.BodyHandlers.ofString());
+        return request(path)
+                .tenant("tenant-a")
+                .user("user-a")
+                .POST(body)
+                .send();
     }
 
     private URI uri(String path) {
         return URI.create("http://127.0.0.1:" + server.port() + path);
+    }
+
+    private Request request(String path) {
+        return new Request(HttpRequest.newBuilder(uri(path)));
+    }
+
+    private final class Request {
+        private final HttpRequest.Builder builder;
+
+        private Request(HttpRequest.Builder builder) {
+            this.builder = builder;
+        }
+
+        private Request tenant(String tenantId) {
+            builder.header("X-Tenant-Id", tenantId);
+            return this;
+        }
+
+        private Request user(String userId) {
+            builder.header("X-User-Id", userId);
+            return this;
+        }
+
+        private Request GET() {
+            builder.GET();
+            return this;
+        }
+
+        private Request POST(String body) {
+            builder.header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body));
+            return this;
+        }
+
+        private HttpResponse<String> send() throws Exception {
+            return client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+        }
     }
 }

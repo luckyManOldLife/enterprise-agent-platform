@@ -1,6 +1,7 @@
 package com.xr.agent.application.service;
 
 import com.xr.agent.application.port.in.TaskUseCase;
+import com.xr.agent.application.port.out.TaskEventStorePort;
 import com.xr.agent.application.port.out.TaskPersistencePort;
 import com.xr.agent.domain.model.AgentTask;
 
@@ -13,9 +14,15 @@ import java.util.UUID;
 public final class DefaultTaskService implements TaskUseCase {
 
     private final TaskPersistencePort taskPersistence;
+    private final TaskEventStorePort taskEvents;
 
     public DefaultTaskService(TaskPersistencePort taskPersistence) {
+        this(taskPersistence, null);
+    }
+
+    public DefaultTaskService(TaskPersistencePort taskPersistence, TaskEventStorePort taskEvents) {
         this.taskPersistence = Objects.requireNonNull(taskPersistence, "taskPersistence");
+        this.taskEvents = taskEvents;
     }
 
     @Override
@@ -45,7 +52,15 @@ public final class DefaultTaskService implements TaskUseCase {
                 "TASK_CREATED",
                 payload,
                 Instant.now());
-        return taskPersistence.saveWithOutbox(task, event, command.idempotencyKey());
+        AgentTask stored = taskPersistence.saveWithOutbox(task, event, command.idempotencyKey());
+        if (taskEvents != null) {
+            taskEvents.append(TaskAuditEvents.fromTask(
+                    stored,
+                    "TASK_CREATED",
+                    payload,
+                    event.occurredAt()));
+        }
+        return stored;
     }
 
     @Override

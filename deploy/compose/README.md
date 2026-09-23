@@ -40,6 +40,8 @@ Set `EAP_IMAGE`, `EAP_IMAGE_TAG`, `EAP_WORKER_IMAGE`, `EAP_WORKER_IMAGE_TAG`,
 `EAP_MODEL_AGENT_IDS` and the `EAP_CLIPROXY_*` variables in `.env.infra`.
 The Worker and CLIProxyAPI must share the `infra` network, where the proxy
 resolves as `infra-cli-proxy-api`.
+Use `EAP_WORKER_MAX_ATTEMPTS` to bound recovered Outbox executions before the
+task is marked failed.
 
 Before starting the app, create the PostgreSQL database and user in the infra
 PostgreSQL container, then apply migrations from `database/schemas` and

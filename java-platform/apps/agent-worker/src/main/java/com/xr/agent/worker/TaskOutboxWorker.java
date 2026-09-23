@@ -2,8 +2,10 @@ package com.xr.agent.worker;
 
 import com.xr.agent.application.port.out.AgentInvokerPort;
 import com.xr.agent.application.port.out.AgentRegistryPort;
+import com.xr.agent.application.port.out.TaskEventStorePort;
 import com.xr.agent.application.port.out.TaskPersistencePort;
 import com.xr.agent.application.port.out.TaskPersistencePort.TaskOutboxMessage;
+import com.xr.agent.application.service.TaskAuditEvents;
 import com.xr.agent.domain.model.AgentDefinition;
 import com.xr.agent.domain.model.AgentTask;
 import com.xr.agent.domain.model.TaskStatus;
@@ -16,6 +18,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -25,25 +28,31 @@ public final class TaskOutboxWorker {
 
     public static final Duration DEFAULT_PROCESSING_LEASE = Duration.ofMinutes(5);
     public static final Duration DEFAULT_RETRY_DELAY = Duration.ofSeconds(30);
+    public static final int DEFAULT_MAX_ATTEMPTS = 3;
 
     private final OutboxStorePort outboxStore;
     private final TaskPersistencePort taskPersistence;
+    private final TaskEventStorePort taskEvents;
     private final AgentRegistryPort agentRegistry;
     private final AgentInvokerPort agentInvoker;
     private final Clock clock;
     private final Duration processingLease;
     private final Duration retryDelay;
+    private final int maxAttempts;
 
     public TaskOutboxWorker(
             OutboxStorePort outboxStore,
             TaskPersistencePort taskPersistence,
+            TaskEventStorePort taskEvents,
             AgentRegistryPort agentRegistry,
             AgentInvokerPort agentInvoker,
             Clock clock,
             Duration processingLease,
-            Duration retryDelay) {
+            Duration retryDelay,
+            int maxAttempts) {
         this.outboxStore = Objects.requireNonNull(outboxStore, "outboxStore");
         this.taskPersistence = Objects.requireNonNull(taskPersistence, "taskPersistence");
+        this.taskEvents = taskEvents;
         this.agentRegistry = agentRegistry;
         this.agentInvoker = agentInvoker;
         if ((agentRegistry == null) != (agentInvoker == null)) {
@@ -52,6 +61,10 @@ public final class TaskOutboxWorker {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.processingLease = requirePositive(processingLease, "processingLease");
         this.retryDelay = requirePositive(retryDelay, "retryDelay");
+        if (maxAttempts <= 0) {
+            throw new IllegalArgumentException("maxAttempts must be positive");
+        }
+        this.maxAttempts = maxAttempts;
     }
 
     public TaskOutboxWorker(OutboxStorePort outboxStore, TaskPersistencePort taskPersistence) {
@@ -60,9 +73,11 @@ public final class TaskOutboxWorker {
                 taskPersistence,
                 null,
                 null,
+                null,
                 Clock.systemUTC(),
                 DEFAULT_PROCESSING_LEASE,
-                DEFAULT_RETRY_DELAY);
+                DEFAULT_RETRY_DELAY,
+                DEFAULT_MAX_ATTEMPTS);
     }
 
     public TaskOutboxWorker(
@@ -73,11 +88,51 @@ public final class TaskOutboxWorker {
         this(
                 outboxStore,
                 taskPersistence,
+                null,
                 agentRegistry,
                 agentInvoker,
                 Clock.systemUTC(),
                 DEFAULT_PROCESSING_LEASE,
-                DEFAULT_RETRY_DELAY);
+                DEFAULT_RETRY_DELAY,
+                DEFAULT_MAX_ATTEMPTS);
+    }
+
+    public TaskOutboxWorker(
+            OutboxStorePort outboxStore,
+            TaskPersistencePort taskPersistence,
+            AgentRegistryPort agentRegistry,
+            AgentInvokerPort agentInvoker,
+            Clock clock,
+            Duration processingLease,
+            Duration retryDelay) {
+        this(
+                outboxStore,
+                taskPersistence,
+                null,
+                agentRegistry,
+                agentInvoker,
+                clock,
+                processingLease,
+                retryDelay,
+                DEFAULT_MAX_ATTEMPTS);
+    }
+
+    public TaskOutboxWorker(
+            OutboxStorePort outboxStore,
+            TaskPersistencePort taskPersistence,
+            TaskEventStorePort taskEvents,
+            AgentRegistryPort agentRegistry,
+            AgentInvokerPort agentInvoker) {
+        this(
+                outboxStore,
+                taskPersistence,
+                taskEvents,
+                agentRegistry,
+                agentInvoker,
+                Clock.systemUTC(),
+                DEFAULT_PROCESSING_LEASE,
+                DEFAULT_RETRY_DELAY,
+                DEFAULT_MAX_ATTEMPTS);
     }
 
     public BatchResult runOnce(int limit) {
@@ -88,7 +143,7 @@ public final class TaskOutboxWorker {
 
         for (OutboxRecord record : records) {
             try {
-                process(record.message(), now);
+                process(record, now);
             } catch (EventProcessingException exception) {
                 if (scheduleRetry(record, exception.code(), now)) {
                     scheduledRetries++;
@@ -111,7 +166,8 @@ public final class TaskOutboxWorker {
         return new BatchResult(records.size(), published, scheduledRetries);
     }
 
-    private void process(TaskOutboxMessage message, Instant now) {
+    private void process(OutboxRecord record, Instant now) {
+        TaskOutboxMessage message = record.message();
         if (!"TASK_CREATED".equals(message.eventType())) {
             throw new EventProcessingException("OUTBOX_EVENT_UNSUPPORTED");
         }
@@ -119,21 +175,41 @@ public final class TaskOutboxWorker {
         AgentTask task = taskPersistence.findById(message.taskId())
                 .orElseThrow(() -> new EventProcessingException("TASK_NOT_FOUND"));
         verifyTaskContext(task, message);
+        if (task.status() == TaskStatus.RUNNING) {
+            if (agentInvoker == null) {
+                return;
+            }
+            handleRecoveredRunningTask(task, record);
+            return;
+        }
         if (task.status() != TaskStatus.CREATED) {
             return;
         }
 
         if (task.deadline() != null && !task.deadline().isAfter(now)) {
             task.timeout();
-            persistTransition(task, message, "TASK_VERSION_CONFLICT");
+            AgentTask timedOut = persistTransition(task, message, "TASK_VERSION_CONFLICT");
+            appendAudit(timedOut == null ? task : timedOut, "TASK_TIMED_OUT", Map.of());
         } else {
             task.start();
             AgentTask running = persistTransition(task, message, "TASK_VERSION_CONFLICT");
-            if (running == null || agentInvoker == null) {
+            if (running == null) {
+                return;
+            }
+            appendAudit(running, "TASK_RUNNING", Map.of("attempt", record.attempts()));
+            if (agentInvoker == null) {
                 return;
             }
             invokeAndPersistResult(running, message);
         }
+    }
+
+    private void handleRecoveredRunningTask(AgentTask task, OutboxRecord record) {
+        if (record.attempts() < maxAttempts) {
+            throw new EventProcessingException("TASK_EXECUTION_IN_PROGRESS");
+        }
+        task.fail("TASK_EXECUTION_ATTEMPTS_EXHAUSTED");
+        persistExecutionResult(task, record.message());
     }
 
     private AgentTask persistTransition(
@@ -178,8 +254,10 @@ public final class TaskOutboxWorker {
     }
 
     private void persistExecutionResult(AgentTask task, TaskOutboxMessage message) {
+        TaskStatus terminalStatus = task.status();
         try {
-            taskPersistence.update(task, task.version());
+            AgentTask stored = taskPersistence.update(task, task.version());
+            appendAudit(stored, eventTypeFor(terminalStatus), Map.of());
         } catch (TaskVersionConflictException exception) {
             AgentTask current = taskPersistence.findById(task.taskId())
                     .orElseThrow(() -> new EventProcessingException("TASK_NOT_FOUND"));
@@ -188,6 +266,22 @@ public final class TaskOutboxWorker {
                 throw new EventProcessingException("TASK_EXECUTION_VERSION_CONFLICT");
             }
         }
+    }
+
+    private void appendAudit(AgentTask task, String eventType, Map<String, Object> payload) {
+        if (taskEvents == null || task == null) {
+            return;
+        }
+        taskEvents.append(TaskAuditEvents.fromTask(task, eventType, payload, clock.instant()));
+    }
+
+    private static String eventTypeFor(TaskStatus status) {
+        return switch (status) {
+            case SUCCEEDED -> "TASK_SUCCEEDED";
+            case FAILED -> "TASK_FAILED";
+            case TIMED_OUT -> "TASK_TIMED_OUT";
+            default -> "TASK_" + status.name();
+        };
     }
 
     private static void verifyTaskContext(AgentTask task, TaskOutboxMessage message) {

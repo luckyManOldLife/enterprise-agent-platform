@@ -2,6 +2,7 @@ package com.xr.agent.worker;
 
 import com.xr.agent.application.port.out.AgentInvokerPort;
 import com.xr.agent.application.port.out.AgentRegistryPort;
+import com.xr.agent.application.port.out.TaskEventStorePort;
 import com.xr.agent.application.port.out.TaskPersistencePort.TaskOutboxMessage;
 import com.xr.agent.domain.model.AgentDefinition;
 import com.xr.agent.domain.model.AgentStatus;
@@ -21,6 +22,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -34,14 +36,16 @@ class TaskOutboxWorkerTest {
     @Test
     void startsCreatedTaskAndPublishesItsEvent() {
         InMemoryTaskPersistence persistence = new InMemoryTaskPersistence();
+        RecordingTaskEventStore events = new RecordingTaskEventStore();
         AgentTask task = saveTask(persistence, null);
 
-        TaskOutboxWorker.BatchResult result = worker(persistence).runOnce(10);
+        TaskOutboxWorker.BatchResult result = worker(persistence, events).runOnce(10);
 
         AgentTask updated = persistence.findById(task.taskId()).orElseThrow();
         assertEquals(new TaskOutboxWorker.BatchResult(1, 1, 0), result);
         assertEquals(TaskStatus.RUNNING, updated.status());
         assertEquals(1, updated.version());
+        assertEquals(java.util.List.of("TASK_RUNNING"), events.eventTypes());
         assertTrue(persistence.claim(1, NOW.plusSeconds(1), LEASE).isEmpty());
     }
 
@@ -65,14 +69,16 @@ class TaskOutboxWorkerTest {
     @Test
     void timesOutAnExpiredCreatedTaskBeforeAgentExecution() {
         InMemoryTaskPersistence persistence = new InMemoryTaskPersistence();
+        RecordingTaskEventStore events = new RecordingTaskEventStore();
         AgentTask task = saveTask(persistence, NOW.minusSeconds(1));
 
-        TaskOutboxWorker.BatchResult result = worker(persistence).runOnce(10);
+        TaskOutboxWorker.BatchResult result = worker(persistence, events).runOnce(10);
 
         AgentTask stored = persistence.findById(task.taskId()).orElseThrow();
         assertEquals(new TaskOutboxWorker.BatchResult(1, 1, 0), result);
         assertEquals(TaskStatus.TIMED_OUT, stored.status());
         assertEquals(1, stored.version());
+        assertEquals(java.util.List.of("TASK_TIMED_OUT"), events.eventTypes());
     }
 
     @Test
@@ -143,17 +149,19 @@ class TaskOutboxWorkerTest {
     @Test
     void persistsTheRealAgentOutputAfterStartingTheTask() {
         InMemoryTaskPersistence persistence = new InMemoryTaskPersistence();
+        RecordingTaskEventStore events = new RecordingTaskEventStore();
         AgentTask task = saveTask(persistence, null);
         AgentInvokerPort invoker = (invokedTask, agent) ->
                 new AgentInvokerPort.AgentInvocationResult(true, Map.of("content", "order found"), null);
 
-        TaskOutboxWorker.BatchResult result = executingWorker(persistence, invoker).runOnce(10);
+        TaskOutboxWorker.BatchResult result = executingWorker(persistence, events, invoker).runOnce(10);
 
         AgentTask stored = persistence.findById(task.taskId()).orElseThrow();
         assertEquals(new TaskOutboxWorker.BatchResult(1, 1, 0), result);
         assertEquals(TaskStatus.SUCCEEDED, stored.status());
         assertEquals("order found", stored.output().get("content"));
         assertEquals(2, stored.version());
+        assertEquals(java.util.List.of("TASK_RUNNING", "TASK_SUCCEEDED"), events.eventTypes());
     }
 
     @Test
@@ -186,28 +194,86 @@ class TaskOutboxWorkerTest {
                 persistence.findById(task.taskId()).orElseThrow().errorCode());
     }
 
+    @Test
+    void retriesRecoveredRunningExecutionUntilAttemptsAreExhausted() {
+        InMemoryTaskPersistence persistence = new InMemoryTaskPersistence();
+        RecordingTaskEventStore events = new RecordingTaskEventStore();
+        AgentTask task = saveTask(persistence, null);
+        AgentTask started = persistence.findById(task.taskId()).orElseThrow();
+        started.start();
+        persistence.update(started, started.version());
+
+        TaskOutboxWorker.BatchResult first = executingWorker(persistence, events, (invokedTask, agent) ->
+                new AgentInvokerPort.AgentInvocationResult(true, Map.of(), null), 2).runOnce(10);
+
+        assertEquals(new TaskOutboxWorker.BatchResult(1, 0, 1), first);
+        assertEquals(TaskStatus.RUNNING, persistence.findById(task.taskId()).orElseThrow().status());
+        OutboxRecord retry = persistence.claim(1, NOW.plusSeconds(30), LEASE).getFirst();
+        assertEquals("TASK_EXECUTION_IN_PROGRESS", retry.lastError());
+        persistence.markFailed(
+                retry.eventId(),
+                retry.claimToken(),
+                retry.lastError(),
+                NOW);
+
+        TaskOutboxWorker.BatchResult finalResult = executingWorker(persistence, events, (invokedTask, agent) ->
+                new AgentInvokerPort.AgentInvocationResult(true, Map.of(), null), 2)
+                .runOnce(10);
+
+        AgentTask stored = persistence.findById(task.taskId()).orElseThrow();
+        assertEquals(new TaskOutboxWorker.BatchResult(1, 1, 0), finalResult);
+        assertEquals(TaskStatus.FAILED, stored.status());
+        assertEquals("TASK_EXECUTION_ATTEMPTS_EXHAUSTED", stored.errorCode());
+        assertEquals(java.util.List.of("TASK_FAILED"), events.eventTypes());
+    }
+
     private static TaskOutboxWorker worker(InMemoryTaskPersistence persistence) {
+        return worker(persistence, null);
+    }
+
+    private static TaskOutboxWorker worker(
+            InMemoryTaskPersistence persistence,
+            TaskEventStorePort events) {
         return new TaskOutboxWorker(
                 persistence,
                 persistence,
+                events,
                 null,
                 null,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 LEASE,
-                RETRY_DELAY);
+                RETRY_DELAY,
+                TaskOutboxWorker.DEFAULT_MAX_ATTEMPTS);
     }
 
     private static TaskOutboxWorker executingWorker(
             InMemoryTaskPersistence persistence,
             AgentInvokerPort invoker) {
+        return executingWorker(persistence, null, invoker);
+    }
+
+    private static TaskOutboxWorker executingWorker(
+            InMemoryTaskPersistence persistence,
+            TaskEventStorePort events,
+            AgentInvokerPort invoker) {
+        return executingWorker(persistence, events, invoker, TaskOutboxWorker.DEFAULT_MAX_ATTEMPTS);
+    }
+
+    private static TaskOutboxWorker executingWorker(
+            InMemoryTaskPersistence persistence,
+            TaskEventStorePort events,
+            AgentInvokerPort invoker,
+            int maxAttempts) {
         return new TaskOutboxWorker(
                 persistence,
                 persistence,
+                events,
                 new SingleAgentRegistry(agent()),
                 invoker,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 LEASE,
-                RETRY_DELAY);
+                RETRY_DELAY,
+                maxAttempts);
     }
 
     private static AgentTask saveTask(InMemoryTaskPersistence persistence, Instant deadline) {
@@ -285,6 +351,26 @@ class TaskOutboxWorkerTest {
         @Override
         public Optional<AgentDefinition> findById(String agentId) {
             return agent.agentId().equals(agentId) ? Optional.of(agent) : Optional.empty();
+        }
+    }
+
+    private static final class RecordingTaskEventStore implements TaskEventStorePort {
+        private final CopyOnWriteArrayList<TaskEvent> events = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void append(TaskEvent event) {
+            events.addIfAbsent(event);
+        }
+
+        @Override
+        public java.util.List<TaskEvent> listByTask(UUID taskId) {
+            return events.stream()
+                    .filter(event -> event.taskId().equals(taskId))
+                    .toList();
+        }
+
+        private java.util.List<String> eventTypes() {
+            return events.stream().map(TaskEvent::eventType).toList();
         }
     }
 }

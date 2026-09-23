@@ -19,6 +19,7 @@ final class WorkerRuntimeConfiguration {
     private final String postgresPassword;
     private final int batchSize;
     private final Duration pollInterval;
+    private final int maxAttempts;
     private final List<String> agentIds;
 
     private WorkerRuntimeConfiguration(
@@ -27,12 +28,14 @@ final class WorkerRuntimeConfiguration {
             String postgresPassword,
             int batchSize,
             Duration pollInterval,
+            int maxAttempts,
             List<String> agentIds) {
         this.postgresUrl = postgresUrl;
         this.postgresUser = postgresUser;
         this.postgresPassword = postgresPassword;
         this.batchSize = batchSize;
         this.pollInterval = pollInterval;
+        this.maxAttempts = maxAttempts;
         this.agentIds = agentIds;
     }
 
@@ -51,6 +54,7 @@ final class WorkerRuntimeConfiguration {
                         environment,
                         "WORKER_POLL_INTERVAL_MILLIS",
                         Math.toIntExact(DEFAULT_POLL_INTERVAL.toMillis()))),
+                positiveInt(environment, "WORKER_MAX_ATTEMPTS", TaskOutboxWorker.DEFAULT_MAX_ATTEMPTS),
                 agentIds(environment.get("MODEL_AGENT_IDS")));
     }
 
@@ -72,6 +76,10 @@ final class WorkerRuntimeConfiguration {
 
     Duration pollInterval() {
         return pollInterval;
+    }
+
+    int maxAttempts() {
+        return maxAttempts;
     }
 
     List<String> agentIds() {

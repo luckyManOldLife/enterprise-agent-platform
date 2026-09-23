@@ -18,12 +18,14 @@ class WorkerRuntimeConfigurationTest {
                 "POSTGRES_PASSWORD", "secret-value",
                 "WORKER_BATCH_SIZE", "25",
                 "WORKER_POLL_INTERVAL_MILLIS", "500",
+                "WORKER_MAX_ATTEMPTS", "4",
                 "MODEL_AGENT_IDS", "supervisor,order-agent"));
 
         assertEquals("jdbc:postgresql://postgres:5432/agent_platform", configuration.postgresUrl());
         assertEquals("agent_worker", configuration.postgresUser());
         assertEquals(25, configuration.batchSize());
         assertEquals(Duration.ofMillis(500), configuration.pollInterval());
+        assertEquals(4, configuration.maxAttempts());
         assertEquals(java.util.List.of("supervisor", "order-agent"), configuration.agentIds());
     }
 
@@ -33,6 +35,7 @@ class WorkerRuntimeConfigurationTest {
 
         assertEquals(WorkerRuntimeConfiguration.DEFAULT_BATCH_SIZE, configuration.batchSize());
         assertEquals(WorkerRuntimeConfiguration.DEFAULT_POLL_INTERVAL, configuration.pollInterval());
+        assertEquals(TaskOutboxWorker.DEFAULT_MAX_ATTEMPTS, configuration.maxAttempts());
         assertEquals(java.util.List.of("supervisor"), configuration.agentIds());
     }
 
@@ -49,6 +52,12 @@ class WorkerRuntimeConfigurationTest {
                         "POSTGRES_USER", "agent",
                         "POSTGRES_PASSWORD", "secret",
                         "WORKER_BATCH_SIZE", "0")));
+        assertThrows(IllegalArgumentException.class, () ->
+                WorkerRuntimeConfiguration.fromEnvironment(Map.of(
+                        "POSTGRES_URL", "jdbc:postgresql://database/platform",
+                        "POSTGRES_USER", "agent",
+                        "POSTGRES_PASSWORD", "secret",
+                        "WORKER_MAX_ATTEMPTS", "0")));
         assertThrows(IllegalArgumentException.class, () ->
                 WorkerRuntimeConfiguration.fromEnvironment(Map.of(
                         "POSTGRES_URL", "jdbc:postgresql://database/platform",
